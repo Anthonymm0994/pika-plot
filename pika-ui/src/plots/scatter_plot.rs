@@ -85,7 +85,7 @@ impl ScatterPlot {
                         for (category, &color) in cat_map {
                             let category_points: Vec<[f64; 2]> = points.iter()
                                 .enumerate()
-                                .filter(|(i, _)| cats.get(*i).map(|c| c == category).unwrap_or(false))
+                                .filter(|(i, _)| cats.get(*i).map(|c: &String| c == category).unwrap_or(false))
                                 .map(|(_, &(x, y))| [x, y])
                                 .collect();
                             

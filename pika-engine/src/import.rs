@@ -184,13 +184,13 @@ pub fn detect_column_types(path: &Path, options: &ImportOptions) -> Result<Vec<C
             .map_err(|e| PikaError::CsvImport(format!("Failed to read headers: {}", e)))?
             .iter()
             .map(|s| s.to_string())
-            .collect()
+            .collect::<Vec<String>>()
     } else {
         // Generate column names
         let record = reader.records().next()
             .ok_or_else(|| PikaError::CsvImport("Empty CSV file".to_string()))?
             .map_err(|e| PikaError::CsvImport(format!("Failed to read first row: {}", e)))?;
-        (0..record.len()).map(|i| format!("column_{}", i + 1)).collect()
+        (0..record.len()).map(|i| format!("column_{}", i + 1)).collect::<Vec<String>>()
     };
     
     // Reset reader for type inference

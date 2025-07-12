@@ -1,22 +1,21 @@
 //! Node implementations for the canvas
 
-pub mod table_node;
-pub mod query_node;
 pub mod plot_node;
+pub mod query_node;
+pub mod table_node;
 
-pub use table_node::TableNode;
-pub use query_node::QueryNode;
 pub use plot_node::PlotNode;
+pub use query_node::QueryNode;
+pub use table_node::TableNode;
 
 use pika_core::{Node, NodeId, Point2, Size2};
-use std::sync::Arc;
 
-/// Helper to create a node from its type name
-pub fn create_node(type_name: &str, position: Point2) -> Option<Box<dyn Node>> {
-    match type_name {
-        "TableNode" => Some(Box::new(TableNode::new(position))),
-        "QueryNode" => Some(Box::new(QueryNode::new(position))),
-        "PlotNode" => Some(Box::new(PlotNode::new(position))),
+/// Factory function to create nodes by type name
+pub fn create_node(node_type: &str, id: NodeId) -> Option<Box<dyn Node>> {
+    match node_type {
+        "PlotNode" => Some(Box::new(PlotNode::new(id))),
+        "QueryNode" => Some(Box::new(QueryNode::new(id))),
+        "TableNode" => Some(Box::new(TableNode::new(id))),
         _ => None,
     }
 }

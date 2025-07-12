@@ -1,20 +1,23 @@
 //! Plot rendering UI components
 
-mod scatter_plot;
-mod line_plot;
-mod bar_plot;
-mod histogram_plot;
-mod heatmap_plot;
-mod box_plot;
-mod plot_renderer;
+pub mod bar_plot;
+pub mod box_plot;
+pub mod heatmap_plot;
+pub mod histogram_plot;
+pub mod line_plot;
+pub mod scatter_plot;
+pub mod plot_renderer;
+pub mod enhanced_scatter_plot;
 
-pub use scatter_plot::ScatterPlot;
-pub use line_plot::LinePlot;
-pub use bar_plot::BarPlot;
-pub use histogram_plot::HistogramPlot;
-pub use heatmap_plot::HeatmapPlot;
-pub use box_plot::BoxPlot;
-pub use plot_renderer::{PlotRenderer, render_plot};
+// Re-exports
+pub use bar_plot::*;
+pub use box_plot::*;
+pub use heatmap_plot::*;
+pub use histogram_plot::*;
+pub use line_plot::*;
+pub use scatter_plot::*;
+pub use plot_renderer::*;
+pub use enhanced_scatter_plot::*;
 
 use pika_core::plots::{PlotConfig, PlotType};
 use egui::Ui;

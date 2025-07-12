@@ -1,6 +1,6 @@
 //! Status bar showing system status and progress.
 
-use egui::{Context, Ui, Color32, ProgressBar};
+use egui::{Ui, Color32, ProgressBar};
 use std::time::{Duration, Instant};
 
 /// Status bar at the bottom of the application.
@@ -63,74 +63,70 @@ impl StatusBar {
         self.memory_total = total_mb;
     }
     
-    pub fn show(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::bottom("status_bar")
-            .exact_height(24.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    // Progress bar if active
-                    if let Some(progress) = self.progress {
-                        ui.add(
-                            ProgressBar::new(progress)
-                                .desired_width(150.0)
-                                .show_percentage()
-                        );
-                        ui.separator();
-                    }
-                    
-                    // Status message with fade out
-                    let elapsed = self.message_time.elapsed();
-                    if elapsed < Duration::from_secs(5) && !self.message.is_empty() {
-                        let alpha = if elapsed > Duration::from_secs(3) {
-                            let fade_time = (elapsed.as_secs_f32() - 3.0) / 2.0;
-                            1.0 - fade_time.min(1.0)
-                        } else {
-                            1.0
-                        };
-                        
-                        let color = match self.message_type {
-                            MessageType::Info => Color32::from_gray(200),
-                            MessageType::Success => Color32::from_rgb(100, 200, 100),
-                            MessageType::Error => Color32::from_rgb(200, 100, 100),
-                        };
-                        
-                        let color = Color32::from_rgba_premultiplied(
-                            (color.r() as f32 * alpha) as u8,
-                            (color.g() as f32 * alpha) as u8,
-                            (color.b() as f32 * alpha) as u8,
-                            (color.a() as f32 * alpha) as u8,
-                        );
-                        
-                        ui.colored_label(color, &self.message);
-                    }
-                    
-                    // Right-aligned items
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Memory usage
-                        let memory_percentage = (self.memory_used as f32 / self.memory_total as f32 * 100.0) as i32;
-                        let memory_color = if memory_percentage > 90 {
-                            Color32::from_rgb(200, 100, 100)
-                        } else if memory_percentage > 70 {
-                            Color32::from_rgb(200, 200, 100)
-                        } else {
-                            Color32::from_gray(180)
-                        };
-                        
-                        ui.colored_label(
-                            memory_color,
-                            format!("💾 {} / {} MB ({}%)", 
-                                self.memory_used, 
-                                self.memory_total,
-                                memory_percentage
-                            )
-                        );
-                        
-                        ui.separator();
-                        
-                        // GPU status
-                        ui.label("🎮 GPU Ready");
-                    });
-                });
+    pub fn show(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            // Progress bar if active
+            if let Some(progress) = self.progress {
+                ui.add(
+                    ProgressBar::new(progress)
+                        .desired_width(150.0)
+                        .show_percentage()
+                );
+                ui.separator();
+            }
+            
+            // Status message with fade out
+            let elapsed = self.message_time.elapsed();
+            if elapsed < Duration::from_secs(5) && !self.message.is_empty() {
+                let alpha = if elapsed > Duration::from_secs(3) {
+                    let fade_time = (elapsed.as_secs_f32() - 3.0) / 2.0;
+                    1.0 - fade_time.min(1.0)
+                } else {
+                    1.0
+                };
+                
+                let color = match self.message_type {
+                    MessageType::Info => Color32::from_gray(200),
+                    MessageType::Success => Color32::from_rgb(100, 200, 100),
+                    MessageType::Error => Color32::from_rgb(200, 100, 100),
+                };
+                
+                let color = Color32::from_rgba_premultiplied(
+                    (color.r() as f32 * alpha) as u8,
+                    (color.g() as f32 * alpha) as u8,
+                    (color.b() as f32 * alpha) as u8,
+                    (color.a() as f32 * alpha) as u8,
+                );
+                
+                ui.colored_label(color, &self.message);
+            }
+            
+            // Right-aligned items
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Memory usage
+                let memory_percentage = (self.memory_used as f32 / self.memory_total as f32 * 100.0) as i32;
+                let memory_color = if memory_percentage > 90 {
+                    Color32::from_rgb(200, 100, 100)
+                } else if memory_percentage > 70 {
+                    Color32::from_rgb(200, 200, 100)
+                } else {
+                    Color32::from_gray(180)
+                };
+                
+                ui.colored_label(
+                    memory_color,
+                    format!("💾 {} / {} MB ({}%)", 
+                        self.memory_used, 
+                        self.memory_total,
+                        memory_percentage
+                    )
+                );
+                
+                ui.separator();
+                
+                // GPU status
+                ui.label("🎮 GPU Ready");
             });
+        });
     }
 } 

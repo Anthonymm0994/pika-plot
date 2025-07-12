@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::time::Instant;
-use parking_lot::Mutex;
+use tokio::sync::Mutex;
 use pika_core::{
     error::{PikaError, Result},
     types::QueryResult,
@@ -30,7 +30,7 @@ impl QueryEngine {
         // Count rows (this is inefficient for large results, but works for now)
         let count_sql = format!("SELECT COUNT(*) FROM ({})", sql);
         let row_count: i64 = {
-            let db = self.database.lock();
+            let db = self.database.lock().await;
             db.query_scalar(&count_sql).await?
         };
         
@@ -48,7 +48,7 @@ impl QueryEngine {
     async fn get_column_names(&self, sql: &str) -> Result<Vec<String>> {
         // Execute with LIMIT 0 to get schema without data
         let schema_sql = format!("{} LIMIT 0", sql);
-        let db = self.database.lock();
+        let db = self.database.lock().await;
         let batches = db.query(&schema_sql).await?;
         
         if let Some(batch) = batches.first() {
@@ -57,13 +57,33 @@ impl QueryEngine {
                 .map(|f| f.name().clone())
                 .collect())
         } else {
-            Ok(Vec::new())
+            // If no batches returned, try to get schema differently
+            // Execute the query with LIMIT 1 to get at least the schema
+            let schema_sql = format!("{} LIMIT 1", sql);
+            let batches = db.query(&schema_sql).await?;
+            
+            if let Some(batch) = batches.first() {
+                let schema = batch.schema();
+                Ok(schema.fields().iter()
+                    .map(|f| f.name().clone())
+                    .collect())
+            } else {
+                // As a last resort, try to infer from the original query
+                // This is a simplified approach - in a real implementation,
+                // we'd parse the SQL to extract column names
+                if sql.to_uppercase().contains("SELECT *") {
+                    // For SELECT *, we can't determine columns without executing
+                    Ok(vec!["*".to_string()])
+                } else {
+                    Ok(Vec::new())
+                }
+            }
         }
     }
     
     /// Execute a query and return Arrow RecordBatches
     pub async fn execute_arrow(&self, sql: &str) -> Result<Vec<duckdb::arrow::record_batch::RecordBatch>> {
-        let db = self.database.lock();
+        let db = self.database.lock().await;
         db.query(sql).await
     }
     
@@ -71,7 +91,7 @@ impl QueryEngine {
     pub async fn validate(&self, sql: &str) -> Result<()> {
         // Try to get schema with LIMIT 0
         let schema_sql = format!("{} LIMIT 0", sql);
-        let db = self.database.lock();
+        let db = self.database.lock().await;
         db.execute(&schema_sql).await?;
         Ok(())
     }
@@ -79,7 +99,7 @@ impl QueryEngine {
     /// Get query execution plan
     pub async fn explain(&self, sql: &str) -> Result<String> {
         let explain_sql = format!("EXPLAIN {}", sql);
-        let db = self.database.lock();
+        let db = self.database.lock().await;
         
         let mut explanation = String::new();
         let results = db.query_map(&explain_sql, |row| {
@@ -106,7 +126,7 @@ mod tests {
         
         // Create test table
         {
-            let database = db.lock();
+            let database = db.lock().await;
             database.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").await.unwrap();
             database.execute("INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob')").await.unwrap();
         }

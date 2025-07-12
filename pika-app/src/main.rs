@@ -1,14 +1,11 @@
 //! Pika-Plot main application - GPU-accelerated data canvas.
 
-use pika_core::error::Result;
-use pika_engine::Engine;
+use pika_core::error::{Result, PikaError};
 use pika_ui::PikaApp;
-use std::sync::Arc;
-use parking_lot::RwLock;
 use tracing::{info, error};
 
 fn main() -> Result<()> {
-    // Initialize logging (similar to frog-viz)
+    // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -19,43 +16,7 @@ fn main() -> Result<()> {
     
     info!("Starting Pika-Plot...");
     
-    // Create tokio runtime (following frog-viz pattern)
-    let runtime = tokio::runtime::Runtime::new()?;
-    
-    // Create engine with runtime handle
-    let engine = runtime.block_on(async {
-        Engine::new(
-            Some(4 * 1024 * 1024 * 1024), // 4GB default limit
-            runtime.handle().clone(),
-        ).await
-    })?;
-    
-    let engine = Arc::new(RwLock::new(engine));
-    
-    // Get event bus and create channels before moving engine
-    let (event_tx, event_rx) = {
-        let engine = engine.read();
-        let event_bus = engine.event_bus();
-        // Use the app_events_sender method
-        let tx = event_bus.app_events_sender();
-        let rx = event_bus.subscribe_app_events();
-        (tx, rx)
-    };
-    
-    // Spawn engine background tasks (like frog-viz)
-    let engine_handle = engine.clone();
-    runtime.spawn(async move {
-        loop {
-            // Process engine events
-            let mut engine = engine_handle.write();
-            if let Err(e) = engine.process_events().await {
-                error!("Engine error: {}", e);
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        }
-    });
-    
-    // Create eframe native options (similar to both frog-viz and pebble)
+    // Create eframe native options
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
@@ -65,23 +26,15 @@ fn main() -> Result<()> {
         ..Default::default()
     };
     
-    // Run the UI (blocking, like frog-viz)
+    // Run the UI
     eframe::run_native(
         "Pika-Plot",
         native_options,
-        Box::new(move |cc| {
-            // Apply theme (from pebble pattern)
-            pika_ui::theme::apply_theme(&cc.egui_ctx);
-            
-            Ok(Box::new(PikaApp::new(
-                cc,
-                engine,
-                runtime.handle().clone(),
-                event_tx,
-                event_rx,
-            )))
+        Box::new(|cc| {
+            // Create the app
+            Ok(Box::new(PikaApp::new(cc)))
         }),
-    )?;
+    ).map_err(|e| PikaError::internal(format!("Failed to run application: {}", e)))?;
     
     Ok(())
 }

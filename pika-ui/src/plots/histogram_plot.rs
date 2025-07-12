@@ -70,7 +70,7 @@ impl HistogramPlot {
                 // Determine number of bins
                 let num_bins = match self.bin_strategy {
                     BinStrategy::Fixed => self.num_bins,
-                    BinStrategy::Sturges => (1.0 + (valid_values.len() as f64).log2()).ceil() as usize,
+                    BinStrategy::Sturges => (1.0_f64 + (valid_values.len() as f64).log2()).ceil() as usize,
                     BinStrategy::Scott => {
                         let h = 3.5 * std_dev / (valid_values.len() as f64).powf(1.0/3.0);
                         ((max - min) / h).ceil() as usize
@@ -140,7 +140,7 @@ impl HistogramPlot {
                         for i in 0..=num_points {
                             let x = min + (max - min) * i as f64 / num_points as f64;
                             let z = (x - mean) / std_dev;
-                            let y = (-0.5 * z * z).exp() / (std_dev * 2.5066282746310002);
+                            let y = (-0.5_f64 * z * z).exp() / (std_dev * 2.5066282746310002_f64);
                             normal_curve.push([x, y]);
                         }
                         

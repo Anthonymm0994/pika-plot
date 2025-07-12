@@ -9,21 +9,27 @@ use pika_core::{
     plots::PlotConfig,
 };
 
-mod database;
-mod import;
-mod memory;
-mod query;
-mod streaming;
-mod workspace;
-mod plot;
-mod gpu;
+pub mod aggregation;
+pub mod cache;
+pub mod database;
+pub mod gpu;
+pub mod import;
+pub mod memory;
+pub mod plot;
+pub mod query;
+pub mod streaming;
+pub mod workspace;
+pub mod enhanced_csv;
 
+// Re-exports
 pub use database::Database;
-pub use import::{import_csv, detect_column_types};
-pub use memory::MemoryCoordinator;
-pub use query::QueryEngine;
-pub use plot::PlotRenderer;
-pub use gpu::GpuManager;
+pub use import::*;
+pub use memory::*;
+pub use plot::*;
+pub use query::*;
+pub use streaming::*;
+pub use workspace::*;
+pub use enhanced_csv::*;
 
 /// Commands that can be sent to the engine
 enum EngineCommand {
@@ -155,10 +161,13 @@ impl EngineWorker {
         let memory_coordinator = Arc::new(MemoryCoordinator::new(None));
         let query_engine = Arc::new(QueryEngine::new(database.clone()));
         
-        // Try to initialize GPU, fall back to CPU rendering if unavailable
-        let gpu_manager = match GpuManager::new().await {
-            Ok(gpu) => Some(Arc::new(gpu)),
-            Err(_) => None,
+        // Initialize GPU manager
+        let gpu_manager = match gpu::GpuManager::new().await {
+            Ok(manager) => Some(Arc::new(manager)),
+            Err(e) => {
+                tracing::warn!("Failed to initialize GPU: {}", e);
+                None
+            }
         };
         
         let plot_renderer = Arc::new(PlotRenderer::new(gpu_manager));

@@ -60,13 +60,13 @@ impl DirectPipeline {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: "vs_main",
                 buffers: &[vertex_buffer_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -90,7 +90,6 @@ impl DirectPipeline {
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
-            cache: None,
         });
         
         DirectPipeline {
@@ -158,13 +157,13 @@ impl InstancedPipeline {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main_instanced"),
+                entry_point: "vs_main_instanced",
                 buffers: &[instance_buffer_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -188,7 +187,6 @@ impl InstancedPipeline {
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
-            cache: None,
         });
         
         InstancedPipeline {
@@ -260,9 +258,8 @@ impl AggregationPipeline {
             label: Some("Aggregation Compute Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: Some("aggregate"),
+            entry_point: "aggregate",
             compilation_options: Default::default(),
-            cache: None,
         });
         
         AggregationPipeline {

@@ -1,15 +1,14 @@
 //! Query node implementation for SQL queries
 
-use pika_core::{Node, NodeId, Point2, Size2, Port, PortDirection, PortType, NodeContext, Result, PikaError};
-use serde::{Deserialize, Serialize};
-use std::any::Any;
+use pika_core::{Node, NodeId, Point2, Size2, Port, PortDirection, PortType, NodeContext, Result, DataNode, PikaError, types::TableInfo};
+use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use egui::{Ui, Color32, Stroke, vec2, Align2, FontId};
 use std::sync::Arc;
-// use arrow::datatypes::SchemaRef;
-// use arrow::record_batch::RecordBatch;
-use super::QUERY_NODE_SIZE;
+use std::any::Any;
+use std::time::Duration;
 
-/// A node representing a SQL query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A node that executes SQL queries
+#[derive(Debug, Clone)]
 pub struct QueryNode {
     id: NodeId,
     name: String,
@@ -30,13 +29,13 @@ pub struct QueryNode {
 
 impl QueryNode {
     /// Create a new query node
-    pub fn new(position: Point2) -> Self {
+    pub fn new(id: NodeId) -> Self {
         Self {
-            id: NodeId::new(),
+            id,
             name: "Query".to_string(),
-            position,
-            size: QUERY_NODE_SIZE,
-            sql: String::new(),
+            position: Point2::new(0.0, 0.0),
+            size: Size2::new(200.0, 100.0),
+            sql: "SELECT * FROM table".to_string(),
             input_tables: Vec::new(),
             output_schema: None,
             cached_result: None,
@@ -320,15 +319,15 @@ mod tests {
     
     #[test]
     fn test_query_node_creation() {
-        let node = QueryNode::new(Point2::new(100.0, 100.0));
+        let node = QueryNode::new(NodeId::new());
         assert_eq!(node.name(), "Query");
-        assert_eq!(node.position(), Point2::new(100.0, 100.0));
+        assert_eq!(node.position(), Point2::new(0.0, 0.0));
         assert!(!node.is_ready());
     }
     
     #[test]
     fn test_query_node_sql() {
-        let mut node = QueryNode::new(Point2::new(0.0, 0.0));
+        let mut node = QueryNode::new(NodeId::new());
         node.set_sql("SELECT * FROM users".to_string());
         assert_eq!(node.name(), "Query: SELECT * FROM users");
         assert!(node.is_ready());
@@ -336,7 +335,7 @@ mod tests {
     
     #[test]
     fn test_query_node_inputs() {
-        let mut node = QueryNode::new(Point2::new(0.0, 0.0));
+        let mut node = QueryNode::new(NodeId::new());
         node.add_input_table("users".to_string());
         node.add_input_table("orders".to_string());
         assert_eq!(node.input_tables.len(), 2);

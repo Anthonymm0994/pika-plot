@@ -30,5 +30,8 @@ egui = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 
+# System information
+num_cpus = "1.0"
+
 [dev-dependencies]
 tempfile = "3.9"

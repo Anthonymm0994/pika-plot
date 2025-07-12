@@ -33,10 +33,9 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plots::{PlotConfig, PlotType, AxisConfig, AxisScale, ColorScale, PlotSpecificConfig, PlotTheme};
+    use crate::plots::{PlotConfig, PlotType, PlotDataConfig};
     use crate::workspace::WorkspaceMode;
-    use crate::types::Camera2D;
-    use std::collections::HashMap;
+    use std::collections::HashSet;
 
     #[test]
     fn test_node_id_generation() {
@@ -49,76 +48,34 @@ mod tests {
     fn test_workspace_mode_default() {
         let mode = WorkspaceMode::default();
         match mode {
-            WorkspaceMode::Notebook { cells, active_cell } => {
-                assert_eq!(cells.len(), 0);
-                assert_eq!(active_cell, None);
+            WorkspaceMode::Canvas => {
+                // Default is Canvas mode
             }
-            _ => panic!("Expected Notebook mode as default"),
-        }
-    }
-
-    #[test]
-    fn test_canvas_mode_creation() {
-        let mode = WorkspaceMode::Canvas {
-            nodes: HashMap::new(),
-            connections: Vec::new(),
-            camera: Camera2D::default(),
-        };
-        match mode {
-            WorkspaceMode::Canvas { nodes, connections, .. } => {
-                assert_eq!(nodes.len(), 0);
-                assert_eq!(connections.len(), 0);
-            }
-            _ => panic!("Expected Canvas mode"),
+            _ => panic!("Expected Canvas mode as default"),
         }
     }
 
     #[test]
     fn test_error_display() {
-        let err = PikaError::InsufficientMemory {
-            required: 1000, // MB
-            available: 500, // MB
-        };
+        let err = PikaError::internal("Test error message");
         let msg = err.to_string();
-        assert!(msg.contains("Not enough memory"));
-        assert!(msg.contains("1000MB"));
-        assert!(msg.contains("500MB"));
+        assert!(msg.contains("Test error message"));
     }
 
     #[test]
     fn test_plot_config_scatter() {
-        let config = PlotConfig {
-            plot_type: PlotType::Scatter,
-            title: Some("Test Plot".to_string()),
-            x_axis: AxisConfig {
-                column: "x".to_string(),
-                label: Some("X Axis".to_string()),
-                scale: AxisScale::Linear,
-                range: None,
-                tick_format: None,
-            },
-            y_axis: AxisConfig {
-                column: "y".to_string(),
-                label: Some("Y Axis".to_string()),
-                scale: AxisScale::Linear,
-                range: None,
-                tick_format: None,
-            },
-            color_scale: ColorScale::default(),
-            theme: PlotTheme::default(),
-            specific: PlotSpecificConfig::Scatter {
-                x_column: "x".to_string(),
-                y_column: "y".to_string(),
-                size_column: None,
-                color_column: None,
-                label_column: None,
-                point_size: 5.0,
-                opacity: 1.0,
-                jitter: None,
-            },
-        };
+        let config = PlotConfig::scatter("x".to_string(), "y".to_string());
         assert_eq!(config.plot_type, PlotType::Scatter);
-        assert_eq!(config.title, Some("Test Plot".to_string()));
+        assert_eq!(config.x_label, Some("x".to_string()));
+        assert_eq!(config.y_label, Some("y".to_string()));
+        
+        match config.specific {
+            PlotDataConfig::ScatterConfig { x_column, y_column, .. } => {
+                assert_eq!(x_column, "x");
+                assert_eq!(y_column, "y");
+            }
+            _ => panic!("Expected ScatterConfig"),
+        }
     }
 
     #[test]
@@ -129,17 +86,26 @@ mod tests {
             PlotType::Line,
             PlotType::Bar,
             PlotType::Histogram,
-            PlotType::Heatmap,
-            PlotType::Box,
+            PlotType::BoxPlot,
             PlotType::Violin,
-            PlotType::Area,
-            PlotType::Pie,
-            PlotType::Donut,
+            PlotType::Heatmap,
+            PlotType::Correlation,
+            PlotType::Scatter3D,
+            PlotType::Surface3D,
+            PlotType::Contour,
+            PlotType::TimeSeries,
+            PlotType::Candlestick,
+            PlotType::Stream,
             PlotType::Treemap,
             PlotType::Sunburst,
             PlotType::Sankey,
             PlotType::Network,
+            PlotType::Radar,
+            PlotType::Polar,
+            PlotType::ParallelCoordinates,
             PlotType::Geo,
+            PlotType::Anomaly,
+            PlotType::Distribution,
         ];
         
         // Ensure each type is unique

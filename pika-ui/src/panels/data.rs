@@ -33,37 +33,32 @@ impl DataPanel {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                for (id, node) in state.data_nodes.iter() {
-                    let selected = state.selected_node == Some(*id);
-                    
-                    let response = ui.selectable_label(
-                        selected,
-                        format!("📊 {}", node.name)
-                    );
-                    
-                    if response.clicked() {
-                        state.selected_node = Some(*id);
-                    }
-                    
-                    // Show node info on hover
-                    response.on_hover_ui(|ui| {
-                        ui.label(format!("Table: {}", node.table_info.table_name));
-                        ui.label(format!("Rows: {}", node.table_info.row_count));
-                        ui.label(format!("Columns: {}", node.table_info.columns.len()));
-                    });
-                    
-                    // Context menu
-                    response.context_menu(|ui| {
-                        if ui.button("Query...").clicked() {
-                            // TODO: Open query dialog
-                            ui.close_menu();
+                for node in &state.data_nodes {
+                    if let Some(selected_id) = state.selected_node {
+                        let is_selected = node.id == selected_id;
+                        
+                        let response = ui.selectable_label(
+                            is_selected,
+                            &node.table_info.name,
+                        );
+                        
+                        if response.clicked() {
+                            state.selected_node = Some(node.id);
                         }
                         
-                        if ui.button("Remove").clicked() {
-                            // TODO: Remove node
-                            ui.close_menu();
-                        }
-                    });
+                        response.clone().on_hover_ui(|ui| {
+                            ui.label(format!("Table: {}", node.table_info.name));
+                            ui.label(format!("Rows: {}", node.table_info.row_count.map_or("Unknown".to_string(), |n| n.to_string())));
+                            ui.label(format!("Columns: {}", node.table_info.columns.len()));
+                        });
+                        
+                        response.context_menu(|ui| {
+                            if ui.button("Remove").clicked() {
+                                // Would remove the node
+                                ui.close_menu();
+                            }
+                        });
+                    }
                 }
             });
         

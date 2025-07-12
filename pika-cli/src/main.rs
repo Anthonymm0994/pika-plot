@@ -1,9 +1,10 @@
 //! Command-line interface for Pika-Plot with enhanced user experience.
 
 use clap::{Parser, Subcommand};
-use pika_core::{Result, PikaError};
+use pika_core::{Result, PikaError, events::EventBus, types::{ImportOptions, NodeId}};
 use pika_engine::Engine;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio;
 
 #[derive(Parser)]
@@ -105,8 +106,9 @@ async fn main() -> Result<()> {
     // Parse command line arguments
     let cli = Cli::parse();
     
-    // Initialize engine
-    let engine = Engine::new().await?;
+    // Initialize engine with event bus
+    let event_bus = Arc::new(EventBus::new(1024));
+    let engine = Engine::new(event_bus).await?;
     
     match cli.command {
         Commands::Import { file, table, database } => {
@@ -144,18 +146,25 @@ async fn import_data(
     
     match extension.to_lowercase().as_str() {
         "csv" => {
-            engine.import_csv(&file, &table).await?;
-            println!("Successfully imported CSV data");
+            let options = ImportOptions {
+                has_header: true,
+                delimiter: ',',
+                quote_char: Some('"'),
+                escape_char: None,
+                skip_rows: 0,
+                max_rows: None,
+                encoding: "utf-8".to_string(),
+            };
+            
+            let node_id = NodeId::new();
+            let table_info = engine.import_csv(file, options, node_id).await?;
+            println!("Successfully imported CSV data: {} rows", table_info.row_count.unwrap_or(0));
         }
         "parquet" => {
-            return Err(PikaError::NotImplemented {
-                feature: "Parquet import".to_string()
-            });
+            return Err(PikaError::not_implemented("Parquet import"));
         }
         "json" => {
-            return Err(PikaError::NotImplemented {
-                feature: "JSON import".to_string()
-            });
+            return Err(PikaError::not_implemented("JSON import"));
         }
         _ => {
             return Err(PikaError::Internal(
@@ -175,7 +184,8 @@ async fn execute_query(
 ) -> Result<()> {
     println!("Executing query...");
     
-    let result = engine.execute_query(&sql).await?;
+    let node_id = NodeId::new();
+    let result = engine.execute_query(sql, node_id).await?;
     
     match format.as_str() {
         "table" => {
@@ -214,9 +224,7 @@ async fn generate_plot(
     println!("Output: {}", output.display());
     
     // TODO: Implement plot generation
-    return Err(PikaError::NotImplemented {
-        feature: "CLI plot generation".to_string()
-    });
+    return Err(PikaError::not_implemented("CLI plot generation"));
 }
 
 async fn export_data(
@@ -243,7 +251,8 @@ async fn export_data(
         format!("SELECT * FROM {}", source)
     };
     
-    let result = engine.execute_query(&sql).await?;
+    let node_id = NodeId::new();
+    let result = engine.execute_query(sql, node_id).await?;
     
     match format.as_str() {
         "csv" => {
@@ -255,9 +264,7 @@ async fn export_data(
             println!("Exported {} rows to JSON", result.row_count);
         }
         "parquet" => {
-            return Err(PikaError::NotImplemented {
-                feature: "Parquet export".to_string()
-            });
+            return Err(PikaError::not_implemented("Parquet export"));
         }
         _ => {
             return Err(PikaError::Internal(
@@ -281,7 +288,8 @@ async fn show_schema(
                       WHERE table_schema = 'main' 
                       ORDER BY table_name";
     
-    let result = engine.execute_query(tables_sql).await?;
+    let node_id = NodeId::new();
+    let result = engine.execute_query(tables_sql.to_string(), node_id).await?;
     
     if result.row_count == 0 {
         println!("No tables found in database");

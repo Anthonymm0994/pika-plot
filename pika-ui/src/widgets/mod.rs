@@ -1,10 +1,19 @@
 //! UI widgets module.
 
+pub mod data_table;
+pub mod drag_drop;
 pub mod file_import_dialog;
 pub mod memory_dialog;
+pub mod node_editor;
+pub mod plot_config;
+pub mod progress_indicator;
 
+pub use data_table::DataTable;
+pub use drag_drop::DragDropHandler;
 pub use file_import_dialog::FileImportDialog;
-pub use memory_dialog::{MemoryDialog, MemoryWarningDialog, MemoryAction};
+pub use memory_dialog::MemoryDialog;
+pub use node_editor::NodeEditor;
+pub use progress_indicator::ProgressIndicator;
 
 use egui::{Color32, Pos2, Rect, Response, Sense, Ui, Vec2};
 
@@ -63,7 +72,7 @@ pub mod utils {
             
             // Zoom with scroll
             if response.hovered() {
-                let scroll_delta = ui.input(|i| i.scroll_delta.y);
+                let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
                 if scroll_delta != 0.0 {
                     let zoom_delta = 1.0 + scroll_delta * 0.001;
                     self.zoom *= zoom_delta;

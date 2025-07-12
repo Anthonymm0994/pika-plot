@@ -25,6 +25,9 @@ egui = { workspace = true }
 tokio = { workspace = true }
 flume = { workspace = true }
 
+# Sync primitives
+parking_lot = { workspace = true }
+
 # Error handling
 anyhow = { workspace = true }
 

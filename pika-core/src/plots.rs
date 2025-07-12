@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Plot types supported by the system
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlotType {
     // Basic plots
     Scatter,

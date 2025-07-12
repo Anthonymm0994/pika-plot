@@ -78,6 +78,47 @@ pub enum AppEvent {
     
     /// Settings changed
     SettingsChanged,
+    
+    /// Import CSV file
+    ImportCsv {
+        path: String,
+        options: crate::types::ImportOptions,
+    },
+    
+    /// Import completed
+    ImportComplete {
+        path: String,
+        table_info: crate::types::TableInfo,
+    },
+    
+    /// Import progress update
+    ImportProgress {
+        path: String,
+        progress: f32,
+    },
+    
+    /// Import error
+    ImportError {
+        path: String,
+        error: String,
+    },
+    
+    /// Query completed
+    QueryComplete {
+        id: NodeId,
+        result: Arc<QueryResult>,
+    },
+    
+    /// Execute query
+    ExecuteQuery {
+        node_id: NodeId,
+        sql: String,
+    },
+    
+    /// Clear cache
+    ClearCache {
+        node_id: Option<NodeId>,
+    },
 }
 
 /// Canvas interaction events
@@ -106,6 +147,9 @@ pub enum CanvasEvent {
         from_port: String,
         to_node: NodeId,
         to_port: String,
+        // Legacy fields for backward compatibility
+        from: (NodeId, String),
+        to: (NodeId, String),
     },
     
     /// Connection deleted
@@ -123,6 +167,11 @@ pub enum CanvasEvent {
     CanvasZoomed {
         zoom_delta: f32,
         focus_point: (f32, f32),
+    },
+    
+    /// Center on nodes
+    CenterOnNodes {
+        node_ids: Vec<NodeId>,
     },
 }
 
