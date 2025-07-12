@@ -1,76 +1,110 @@
-//! Workspace management for saving and loading project state.
+//! Workspace save/load functionality.
 
+use std::path::Path;
 use pika_core::{
     error::{PikaError, Result},
     snapshot::WorkspaceSnapshot,
-    types::NodeId,
 };
-use crate::database::Database;
-use std::path::Path;
-use std::fs;
 
-/// Create a snapshot of the current workspace state.
-pub async fn create_snapshot(db: &Database) -> Result<WorkspaceSnapshot> {
-    // For now, just create a basic snapshot
-    // In a real implementation, we'd capture all relevant state
-    let mut snapshot = WorkspaceSnapshot::new();
-    
-    // Add table information to metadata
-    snapshot.metadata.description = Some("Auto-generated snapshot".to_string());
-    snapshot.metadata.tags = vec!["auto".to_string()];
-    
-    Ok(snapshot)
+/// Save a workspace snapshot to a file
+pub async fn save_workspace(snapshot: &WorkspaceSnapshot, path: &Path) -> Result<()> {
+    snapshot.save_to_file(path)
 }
 
-/// Save a workspace snapshot to a file.
-pub fn save_snapshot(snapshot: &WorkspaceSnapshot, path: &Path) -> Result<()> {
-    let file = std::fs::File::create(path)
-        .map_err(|e| PikaError::Other(format!("Failed to create file: {}", e)))?;
-    
-    serde_json::to_writer_pretty(file, snapshot)
-        .map_err(|e| PikaError::Other(format!("Failed to serialize snapshot: {}", e)))?;
-    
-    Ok(())
+/// Load a workspace snapshot from a file
+pub async fn load_workspace(path: &Path) -> Result<WorkspaceSnapshot> {
+    WorkspaceSnapshot::load_from_file(path)
 }
 
-/// Load a workspace snapshot from a file.
-pub fn load_snapshot(path: &Path) -> Result<WorkspaceSnapshot> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| PikaError::Other(format!("Failed to open file: {}", e)))?;
-    
-    let snapshot = serde_json::from_reader(file)
-        .map_err(|e| PikaError::Other(format!("Failed to deserialize snapshot: {}", e)))?;
-    
-    Ok(snapshot)
+/// Export workspace data to various formats
+pub async fn export_workspace(
+    snapshot: &WorkspaceSnapshot,
+    path: &Path,
+    format: WorkspaceExportFormat,
+) -> Result<()> {
+    match format {
+        WorkspaceExportFormat::Json => {
+            let json = serde_json::to_string_pretty(snapshot)?;
+            std::fs::write(path, json)?;
+            Ok(())
+        }
+        WorkspaceExportFormat::Ron => {
+            let ron = ron::to_string(snapshot)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize to RON: {}", e))?;
+            std::fs::write(path, ron)?;
+            Ok(())
+        }
+    }
 }
 
-/// Restore workspace state from a snapshot.
-pub async fn restore_snapshot(db: &mut Database, snapshot: &WorkspaceSnapshot) -> Result<()> {
-    // In a real implementation, we'd restore all state
-    // For now, just validate the snapshot
-    if snapshot.metadata.version != "1.0.0" {
-        return Err(PikaError::UnsupportedVersion(
-            snapshot.metadata.version.clone()
-        ));
+/// Workspace export formats
+#[derive(Debug, Clone, Copy)]
+pub enum WorkspaceExportFormat {
+    Json,
+    Ron,
+}
+
+/// Validate a workspace snapshot
+pub fn validate_snapshot(snapshot: &WorkspaceSnapshot) -> Result<()> {
+    // Check version compatibility
+    if snapshot.version > WorkspaceSnapshot::CURRENT_VERSION {
+        return Err(PikaError::UnsupportedVersion {
+            found: snapshot.version,
+            expected: WorkspaceSnapshot::CURRENT_VERSION,
+        });
     }
     
-    // TODO: Restore tables, queries, plots, etc.
+    // Validate node connections
+    for connection in &snapshot.connections {
+        // Check that both nodes exist
+        if !snapshot.nodes.contains_key(&connection.from_node) {
+            return Err(PikaError::InvalidConnection(
+                format!("Connection references non-existent source node: {:?}", connection.from_node)
+            ));
+        }
+        if !snapshot.nodes.contains_key(&connection.to_node) {
+            return Err(PikaError::InvalidConnection(
+                format!("Connection references non-existent target node: {:?}", connection.to_node)
+            ));
+        }
+    }
     
     Ok(())
 }
 
-/// Get list of tables in the database.
-fn get_table_list(db: &Database) -> Result<Vec<String>> {
-    let mut stmt = db.prepare(
-        "SELECT table_name FROM information_schema.tables 
-         WHERE table_schema = 'main' 
-         AND table_name NOT LIKE 'pika_%'"
-    )?;
+/// Migrate old snapshot formats to current version
+pub fn migrate_snapshot(snapshot: &mut WorkspaceSnapshot) -> Result<()> {
+    // Currently no migrations needed
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pika_core::snapshot::SnapshotBuilder;
     
-    let tables = stmt.query_map([], |row| row.get::<_, String>(0))
-        .map_err(|e| PikaError::Database(e.to_string()))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| PikaError::Database(e.to_string()))?;
+    #[tokio::test]
+    async fn test_workspace_save_load() {
+        let snapshot = SnapshotBuilder::new()
+            .with_description("Test workspace".to_string())
+            .build();
+        
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let path = temp_file.path();
+        
+        // Save
+        save_workspace(&snapshot, path).await.unwrap();
+        
+        // Load
+        let loaded = load_workspace(path).await.unwrap();
+        
+        assert_eq!(loaded.version, snapshot.version);
+        assert_eq!(loaded.metadata.description, snapshot.metadata.description);
+    }
     
-    Ok(tables)
+    #[test]
+    fn test_validate_snapshot() {
+        let snapshot = WorkspaceSnapshot::new();
+        assert!(validate_snapshot(&snapshot).is_ok());
+    }
 } 

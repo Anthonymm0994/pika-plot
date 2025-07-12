@@ -1,284 +1,268 @@
-//! Pika-Plot engine for data processing and GPU acceleration.
+//! Main engine module that coordinates data processing.
 
-pub mod aggregation;
-pub mod cache;
-pub mod database;
-pub mod gpu;
-pub mod import;
-pub mod memory_coordinator;
-pub mod query;
-pub mod streaming;
-pub mod workspace;
-pub mod plot;
-
-use pika_core::{
-    events::{AppEvent, EventBus, PlotRenderData},
-    types::{NodeId, TableInfo, ImportOptions, QueryResult},
-    plots::PlotConfig,
-    error::{Result, PikaError},
-    snapshot::WorkspaceSnapshot,
-};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
-use tokio::runtime::Handle;
-use crate::memory_coordinator::MemoryCoordinator;
+use tokio::sync::{mpsc, oneshot, Mutex};
+use pika_core::{
+    error::{PikaError, Result},
+    events::{Event, EventBus, QueryEvent, AppEvent},
+    types::{NodeId, QueryResult, TableInfo},
+    plots::PlotConfig,
+};
 
-/// Main compute engine that coordinates data processing.
-pub struct Engine {
-    /// Event bus for UI communication
-    event_bus: EventBus,
-    
-    /// Database connection
-    database: Arc<database::Database>,
-    
-    /// GPU manager
-    gpu_manager: Option<Arc<gpu::GpuManager>>,
-    
-    /// Cache manager
-    cache: Arc<cache::QueryCache>,
-    
-    /// Memory coordinator
-    memory_coordinator: Arc<MemoryCoordinator>,
-    
-    /// Runtime handle for spawning tasks
-    runtime: Handle,
-    
-    /// Command channel for internal operations
-    command_rx: mpsc::Receiver<EngineCommand>,
-    command_tx: mpsc::Sender<EngineCommand>,
-}
+mod database;
+mod import;
+mod memory;
+mod query;
+mod streaming;
+mod workspace;
+mod plot;
+mod gpu;
+
+pub use database::Database;
+pub use import::{import_csv, detect_column_types};
+pub use memory::MemoryCoordinator;
+pub use query::QueryEngine;
+pub use plot::PlotRenderer;
+pub use gpu::GpuManager;
 
 /// Commands that can be sent to the engine
 enum EngineCommand {
-    ImportFile {
+    ImportCsv {
         path: std::path::PathBuf,
-        options: ImportOptions,
-        response: oneshot::Sender<Result<TableInfo>>,
+        options: pika_core::types::ImportOptions,
+        node_id: NodeId,
+        reply: oneshot::Sender<Result<TableInfo>>,
     },
     ExecuteQuery {
         sql: String,
-        response: oneshot::Sender<Result<QueryResult>>,
+        node_id: NodeId,
+        reply: oneshot::Sender<Result<QueryResult>>,
     },
-    RenderPlot {
+    PreparePlot {
+        query_result: Arc<QueryResult>,
         config: PlotConfig,
-        query_result: QueryResult,
-        response: oneshot::Sender<Result<PlotRenderData>>,
+        reply: oneshot::Sender<Result<pika_core::events::PlotRenderData>>,
     },
     Shutdown,
-    SaveSnapshot(oneshot::Sender<Result<WorkspaceSnapshot>>),
-    RestoreSnapshot(WorkspaceSnapshot),
+}
+
+/// Main engine struct that coordinates all data processing
+pub struct Engine {
+    command_tx: mpsc::Sender<EngineCommand>,
+    event_bus: Arc<EventBus>,
+    _handle: tokio::task::JoinHandle<()>,
 }
 
 impl Engine {
-    /// Create a new engine instance.
-    pub async fn new(memory_limit: Option<u64>, runtime: Handle) -> Result<Self> {
-        let event_bus = EventBus::new();
-        let (command_tx, command_rx) = mpsc::channel(256);
+    /// Create a new engine instance
+    pub async fn new(event_bus: Arc<EventBus>) -> Result<Self> {
+        let (command_tx, command_rx) = mpsc::channel(100);
+        let event_bus_clone = event_bus.clone();
         
-        // Get system memory for coordinator
-        // TODO: Add sys-info crate for actual memory detection
-        let total_ram = 8 * 1024 * 1024 * 1024; // Default 8GB for now
+        let handle = tokio::spawn(async move {
+            let mut engine = EngineWorker::new(event_bus_clone).await;
+            engine.run(command_rx).await;
+        });
         
-        let memory_coordinator = Arc::new(MemoryCoordinator::new(total_ram));
-        
-        // Create database with configured memory limit
-        let database = Arc::new(database::Database::new(memory_limit).await?);
-        
-        // Configure DuckDB memory limit
-        memory_coordinator.configure_duckdb(database.connection())
-            .map_err(|e| PikaError::Other(e.to_string()))?;
-        
-        // Create cache with memory coordinator
-        let cache_limit = memory_limit.unwrap_or(1024 * 1024 * 1024);
-        let cache = Arc::new(cache::QueryCache::new_with_limit(cache_limit));
-        
-        // Try to initialize GPU
-        let gpu_manager = match gpu::GpuManager::new().await {
-            Ok(gpu) => Some(Arc::new(gpu)),
-            Err(e) => {
-                tracing::warn!("GPU initialization failed: {}", e);
-                None
-            }
-        };
-        
-        Ok(Self {
-            event_bus,
-            database,
-            gpu_manager,
-            cache,
-            memory_coordinator,
-            runtime,
-            command_rx,
+        Ok(Engine {
             command_tx,
+            event_bus,
+            _handle: handle,
         })
     }
     
-    /// Process engine events and commands.
-    pub async fn process_events(&mut self) -> Result<()> {
-        // Check for commands
-        match self.command_rx.try_recv() {
-            Ok(cmd) => match cmd {
-                EngineCommand::ImportFile { path, options, response } => {
-                    // Send import started event
-                    let _ = self.event_bus.send_app_event(AppEvent::ImportStarted { 
-                        path: path.clone() 
-                    });
-                    
-                    let result = import::import_file(&self.database, &path, options, Some(self.event_bus.clone())).await;
-                    match result {
-                        Ok(table_info) => {
-                            let _ = self.event_bus.send_app_event(AppEvent::ImportComplete { 
-                                path,
-                                table_info: table_info.clone(),
-                            });
-                            let _ = response.send(Ok(table_info));
-                        }
-                        Err(e) => {
-                            let _ = self.event_bus.send_app_event(AppEvent::ImportError { 
-                                path,
-                                error: e.to_string(),
-                            });
-                            let _ = response.send(Err(e));
-                        }
-                    }
-                }
-                EngineCommand::ExecuteQuery { sql, response } => {
-                    let _ = self.event_bus.send_app_event(AppEvent::QueryStarted { 
-                        id: NodeId::default() // Placeholder, actual ID would be generated
-                    });
-                    
-                    let result = query::execute(&self.database, &sql).await;
-                    match result {
-                        Ok(query_result) => {
-                            let _ = self.event_bus.send_app_event(AppEvent::QueryComplete { 
-                                id: NodeId::default(), // Placeholder
-                                result: Ok(query_result.clone()),
-                            });
-                            let _ = response.send(Ok(query_result));
-                        }
-                        Err(e) => {
-                            let _ = self.event_bus.send_app_event(AppEvent::QueryComplete { 
-                                id: NodeId::default(), // Placeholder
-                                result: Err(e.to_string()),
-                            });
-                            let _ = response.send(Err(e));
-                        }
-                    }
-                }
-                EngineCommand::RenderPlot { config, query_result, response } => {
-                    if let Some(gpu) = &self.gpu_manager {
-                        let renderer = plot::renderer::PlotRenderer::new(gpu.clone());
-                        match renderer.prepare_plot_data(&config, &query_result) {
-                            Ok(plot_data) => {
-                                let _ = response.send(Ok(plot_data));
-                            }
-                            Err(e) => {
-                                let _ = response.send(Err(e));
-                            }
-                        }
-                    } else {
-                        let _ = response.send(Err(PikaError::Other("GPU not available".to_string())));
-                    }
-                }
-                EngineCommand::SaveSnapshot(response) => {
-                    let snapshot = workspace::create_snapshot(&self.database).await?;
-                    let _ = response.send(Ok(snapshot));
-                }
-                EngineCommand::RestoreSnapshot(snapshot) => {
-                    // Can't clone Database, so we need a different approach
-                    // For now, just log that we would restore
-                    tracing::info!("Would restore snapshot (not implemented)");
-                    // TODO: Implement proper snapshot restoration
-                }
-                EngineCommand::Shutdown => {
-                    tracing::info!("Engine received shutdown command.");
-                    // No explicit action needed here, the runtime will exit.
-                }
-            },
-            Err(mpsc::error::TryRecvError::Empty) => {},
-            Err(e) => return Err(PikaError::Internal(format!("Command channel error: {}", e))),
-        }
-        
-        // Check memory pressure periodically
-        self.memory_coordinator.update_memory_pressure();
-        
-        Ok(())
+    /// Create a new engine with default event bus
+    pub async fn new_default() -> Result<Self> {
+        let event_bus = Arc::new(EventBus::new(1024));
+        Self::new(event_bus).await
     }
     
-    /// Get the event bus.
-    pub fn event_bus(&self) -> &EventBus {
-        &self.event_bus
+    /// Get the event bus
+    pub fn event_bus(&self) -> Arc<EventBus> {
+        self.event_bus.clone()
     }
     
-    /// Get the memory coordinator.
-    pub fn memory_coordinator(&self) -> &Arc<MemoryCoordinator> {
-        &self.memory_coordinator
-    }
-    
-    /// Import data from a file.
-    pub async fn import_file(
+    /// Import a CSV file
+    pub async fn import_csv(
         &self,
-        path: &std::path::Path,
-        options: ImportOptions,
+        path: std::path::PathBuf,
+        options: pika_core::types::ImportOptions,
+        node_id: NodeId,
     ) -> Result<TableInfo> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.command_tx.send(EngineCommand::ImportFile { 
-            path: path.to_path_buf(), 
-            options, 
-            response: tx 
-        }).await;
-        rx.await.map_err(|_| PikaError::Other("Failed to receive response".to_string()))?
+        let (reply_tx, reply_rx) = oneshot::channel();
+        
+        self.command_tx.send(EngineCommand::ImportCsv {
+            path,
+            options,
+            node_id,
+            reply: reply_tx,
+        }).await.map_err(|_| PikaError::internal("Engine channel closed"))?;
+        
+        reply_rx.await.map_err(|_| PikaError::internal("Failed to receive response"))?
     }
     
-    /// Execute a query and return results.
-    pub async fn execute_query(&self, sql: &str) -> Result<QueryResult> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.command_tx.send(EngineCommand::ExecuteQuery { 
-            sql: sql.to_string(), 
-            response: tx 
-        }).await;
-        rx.await.map_err(|_| PikaError::Other("Failed to receive response".to_string()))?
+    /// Execute a SQL query
+    pub async fn execute_query(&self, sql: String, node_id: NodeId) -> Result<QueryResult> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        
+        self.command_tx.send(EngineCommand::ExecuteQuery {
+            sql,
+            node_id,
+            reply: reply_tx,
+        }).await.map_err(|_| PikaError::internal("Engine channel closed"))?;
+        
+        reply_rx.await.map_err(|_| PikaError::internal("Failed to receive response"))?
     }
     
-    /// Save current state as a snapshot.
-    pub async fn save_snapshot(&self) -> Result<WorkspaceSnapshot> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.command_tx.send(EngineCommand::SaveSnapshot(tx)).await;
-        rx.await.map_err(|_| PikaError::Other("Failed to receive response".to_string()))?
+    /// Prepare plot data for rendering
+    pub async fn prepare_plot(
+        &self,
+        query_result: Arc<QueryResult>,
+        config: PlotConfig,
+    ) -> Result<pika_core::events::PlotRenderData> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        
+        self.command_tx.send(EngineCommand::PreparePlot {
+            query_result,
+            config,
+            reply: reply_tx,
+        }).await.map_err(|_| PikaError::internal("Engine channel closed"))?;
+        
+        reply_rx.await.map_err(|_| PikaError::internal("Failed to receive response"))?
     }
     
-    /// Load state from a snapshot.
-    pub async fn load_snapshot(&mut self, path: &std::path::Path) -> Result<()> {
-        let snapshot = workspace::load_snapshot(path)?;
-        let _ = self.command_tx.send(EngineCommand::RestoreSnapshot(snapshot)).await;
+    /// Shutdown the engine
+    pub async fn shutdown(&self) -> Result<()> {
+        self.command_tx.send(EngineCommand::Shutdown)
+            .await
+            .map_err(|_| PikaError::internal("Engine channel closed"))?;
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[tokio::test]
-    async fn test_engine_creation() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let engine = Engine::new(Some(1024 * 1024 * 1024), runtime.handle().clone()).await;
-        assert!(engine.is_ok());
-    }
-    
-    #[tokio::test] 
-    async fn test_event_bus() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let engine = Engine::new(None, runtime.handle().clone()).await.unwrap();
-        let mut rx = engine.event_bus().subscribe_app_events();
+/// Internal engine worker that processes commands
+struct EngineWorker {
+    database: Arc<Mutex<Database>>,
+    memory_coordinator: Arc<MemoryCoordinator>,
+    query_engine: Arc<QueryEngine>,
+    plot_renderer: Arc<PlotRenderer>,
+    event_bus: Arc<EventBus>,
+}
+
+impl EngineWorker {
+    async fn new(event_bus: Arc<EventBus>) -> Self {
+        let database = Arc::new(Mutex::new(Database::new().await.unwrap()));
+        let memory_coordinator = Arc::new(MemoryCoordinator::new(None));
+        let query_engine = Arc::new(QueryEngine::new(database.clone()));
         
-        // Send a test event
-        engine.event_bus().send_app_event(AppEvent::EngineReady).unwrap();
+        // Try to initialize GPU, fall back to CPU rendering if unavailable
+        let gpu_manager = match GpuManager::new().await {
+            Ok(gpu) => Some(Arc::new(gpu)),
+            Err(_) => None,
+        };
         
-        // Receive it
-        match rx.recv().await {
-            Ok(AppEvent::EngineReady) => {},
-            _ => panic!("Wrong event type"),
+        let plot_renderer = Arc::new(PlotRenderer::new(gpu_manager));
+        
+        EngineWorker {
+            database,
+            memory_coordinator,
+            query_engine,
+            plot_renderer,
+            event_bus,
         }
     }
+    
+    async fn run(&mut self, mut command_rx: mpsc::Receiver<EngineCommand>) {
+        while let Some(command) = command_rx.recv().await {
+            match command {
+                EngineCommand::ImportCsv { path, options, node_id, reply } => {
+                    // Send import started event
+                    self.event_bus.send(Event::App(AppEvent::FileOpened(
+                        path.display().to_string()
+                    )));
+                    
+                    let result = import::import_csv(
+                        &path, 
+                        &node_id, 
+                        &options, 
+                        Some(self.event_bus.clone())
+                    ).await;
+                    
+                    match &result {
+                        Ok(table_info) => {
+                            // Store table info
+                            tracing::info!("Imported table: {:?}", table_info);
+                        }
+                        Err(e) => {
+                            tracing::error!("Import failed: {}", e);
+                        }
+                    }
+                    
+                    let _ = reply.send(result);
+                }
+                
+                EngineCommand::ExecuteQuery { sql, node_id, reply } => {
+                    self.event_bus.send(Event::Query(QueryEvent::Started {
+                        node_id,
+                        sql: sql.clone(),
+                        cache_key: None,
+                    }));
+                    
+                    let result = self.query_engine.execute(&sql).await;
+                    
+                    match &result {
+                        Ok(query_result) => {
+                            self.event_bus.send(Event::Query(QueryEvent::Completed {
+                                node_id,
+                                result: Arc::new(query_result.clone()),
+                                cached: false,
+                            }));
+                        }
+                        Err(e) => {
+                            self.event_bus.send(Event::Query(QueryEvent::Failed {
+                                node_id,
+                                error: e.to_string(),
+                            }));
+                        }
+                    }
+                    
+                    let _ = reply.send(result);
+                }
+                
+                EngineCommand::PreparePlot { query_result, config, reply } => {
+                    // For now, just create a simple PlotRenderData
+                    // In a real implementation, this would extract data from query_result
+                    let plot_data = pika_core::events::PlotRenderData {
+                        data: Arc::new(duckdb::arrow::record_batch::RecordBatch::new_empty(
+                            Arc::new(duckdb::arrow::datatypes::Schema::empty())
+                        )),
+                        config,
+                    };
+                    
+                    let _ = reply.send(Ok(plot_data));
+                }
+                
+                EngineCommand::Shutdown => {
+                    tracing::info!("Engine shutting down");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Get the available memory in bytes
+pub fn get_available_memory() -> u64 {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.available_memory()
+}
+
+/// Get the total memory in bytes
+pub fn get_total_memory() -> u64 {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.total_memory()
 }

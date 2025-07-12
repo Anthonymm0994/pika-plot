@@ -1,1 +1,0 @@
-I did not use a specific prompt, but I shared self_assessment_followup.md with all 4 agents and these were their responses.

@@ -1,109 +1,109 @@
-//! Workspace management types.
+//! Workspace management types and functionality.
 
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use crate::types::{NodeId, Camera2D, Connection, ImportOptions, Point2};
-use crate::nodes::{CanvasNode, NotebookCell};
-use crate::plots::PlotTheme;
+use std::path::PathBuf;
 
-/// UI mode for the workspace
+use crate::types::NodeId;
+
+/// Workspace configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WorkspaceMode {
-    /// Linear notebook interface
-    Notebook {
-        cells: Vec<NotebookCell>,
-        active_cell: Option<usize>,
-    },
-    /// Free-form canvas interface
-    Canvas {
-        nodes: HashMap<NodeId, CanvasNode>,
-        connections: Vec<Connection>,
-        camera: Camera2D,
-    },
+pub struct WorkspaceConfig {
+    pub name: String,
+    pub description: Option<String>,
+    pub auto_save: bool,
+    pub auto_save_interval_secs: u64,
+    pub recent_files: Vec<PathBuf>,
+    pub preferences: WorkspacePreferences,
 }
 
-impl Default for WorkspaceMode {
+impl Default for WorkspaceConfig {
     fn default() -> Self {
-        // Notebook mode is the default per requirements
-        WorkspaceMode::Notebook {
-            cells: Vec::new(),
-            active_cell: None,
+        WorkspaceConfig {
+            name: "Untitled Workspace".to_string(),
+            description: None,
+            auto_save: true,
+            auto_save_interval_secs: 300, // 5 minutes
+            recent_files: Vec::new(),
+            preferences: WorkspacePreferences::default(),
         }
     }
 }
 
-/// Workspace snapshot for saving/loading
+/// Workspace preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceSnapshot {
-    /// Snapshot format version
-    pub version: u32,
-    /// Creation timestamp
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    /// Current workspace mode and content
-    pub mode: WorkspaceMode,
-    /// Referenced data sources (not embedded)
-    pub data_sources: Vec<DataSourceRef>,
-    /// UI theme
-    pub theme: PlotTheme,
-    /// Memory limit in bytes (if set)
-    pub memory_limit: Option<usize>,
+pub struct WorkspacePreferences {
+    pub show_grid: bool,
+    pub snap_to_grid: bool,
+    pub grid_size: f32,
+    pub auto_layout: bool,
+    pub show_minimap: bool,
+    pub connection_style: ConnectionStyle,
 }
 
-impl WorkspaceSnapshot {
-    /// Current snapshot version
-    pub const CURRENT_VERSION: u32 = 1;
-    
-    /// Create a new snapshot
-    pub fn new(mode: WorkspaceMode, data_sources: Vec<DataSourceRef>, theme: PlotTheme) -> Self {
-        WorkspaceSnapshot {
-            version: Self::CURRENT_VERSION,
-            created_at: chrono::Utc::now(),
-            mode,
-            data_sources,
-            theme,
-            memory_limit: None,
+impl Default for WorkspacePreferences {
+    fn default() -> Self {
+        WorkspacePreferences {
+            show_grid: true,
+            snap_to_grid: true,
+            grid_size: 20.0,
+            auto_layout: false,
+            show_minimap: true,
+            connection_style: ConnectionStyle::Bezier,
         }
     }
 }
 
-/// Reference to a data source file
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataSourceRef {
-    /// Original file path
-    pub original_path: PathBuf,
-    /// Table name in DuckDB
-    pub table_name: String,
-    /// Import options used
-    pub import_options: ImportOptions,
-    /// SHA256 hash of the file
-    pub file_hash: String,
-    /// File size in bytes
-    pub file_size: u64,
-    /// Last modified timestamp
-    pub last_modified: chrono::DateTime<chrono::Utc>,
+/// Connection line style
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectionStyle {
+    Straight,
+    Bezier,
+    Orthogonal,
 }
 
-/// Workspace state that can be saved/loaded
+/// Workspace state that can be persisted
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceState {
-    /// Current mode
-    pub mode: WorkspaceMode,
-    /// Window size
-    pub window_size: Point2,
-    /// Theme
-    pub theme: PlotTheme,
-    /// Recent files
-    pub recent_files: Vec<PathBuf>,
+    pub canvas_nodes: HashMap<NodeId, crate::nodes::CanvasNode>,
+    pub connections: Vec<Connection>,
+    pub camera_position: (f32, f32),
+    pub camera_zoom: f32,
+    pub selected_nodes: Vec<NodeId>,
 }
 
 impl Default for WorkspaceState {
     fn default() -> Self {
         WorkspaceState {
-            mode: WorkspaceMode::default(),
-            window_size: Point2::new(1280.0, 720.0),
-            theme: PlotTheme::default(),
-            recent_files: Vec::new(),
+            canvas_nodes: HashMap::new(),
+            connections: Vec::new(),
+            camera_position: (0.0, 0.0),
+            camera_zoom: 1.0,
+            selected_nodes: Vec::new(),
         }
+    }
+}
+
+/// Connection between nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Connection {
+    pub id: String,
+    pub from_node: NodeId,
+    pub from_port: String,
+    pub to_node: NodeId,
+    pub to_port: String,
+}
+
+/// Workspace mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceMode {
+    Canvas,
+    Notebook,
+    Split,
+}
+
+impl Default for WorkspaceMode {
+    fn default() -> Self {
+        WorkspaceMode::Canvas
     }
 } 

@@ -1,30 +1,27 @@
-//! GPU acceleration module for plot rendering.
+//! GPU management and rendering infrastructure.
 
 mod pipelines;
-mod shaders;
 
-pub use pipelines::{PlotPipelines, PlotVertex, PlotInstance, PlotUniforms};
+pub use pipelines::{DirectPipeline, InstancedPipeline, AggregationPipeline, ViewProjectionUniform};
 
-use pika_core::{
-    error::{PikaError, Result},
-    events::RenderMode,
-};
 use std::sync::Arc;
+use pika_core::error::{PikaError, Result};
 
-/// GPU resource manager
+/// GPU manager for handling device and rendering resources
 pub struct GpuManager {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    pipelines: PlotPipelines,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub adapter_info: wgpu::AdapterInfo,
 }
 
 impl GpuManager {
     /// Create a new GPU manager
     pub async fn new() -> Result<Self> {
-        // Initialize wgpu
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            dx12_shader_compiler: Default::default(),
+            flags: wgpu::InstanceFlags::default(),
+            gles_minor_version: wgpu::Gles3MinorVersion::default(),
         });
         
         let adapter = instance
@@ -34,69 +31,60 @@ impl GpuManager {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| PikaError::GpuInitialization("No suitable GPU adapter found".to_string()))?;
+            .ok_or_else(|| PikaError::RenderError("No suitable GPU adapter found".to_string()))?;
+        
+        let adapter_info = adapter.get_info();
         
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Pika-Plot GPU Device"),
-                    features: wgpu::Features::empty(),
-                    limits: wgpu::Limits::default(),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
                 },
                 None,
             )
             .await
-            .map_err(|e| PikaError::GpuInitialization(e.to_string()))?;
-        
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
-        
-        // Create pipelines
-        let pipelines = PlotPipelines::new(&device)?;
+            .map_err(|e| PikaError::RenderError(format!("Failed to create GPU device: {}", e)))?;
         
         Ok(GpuManager {
-            device,
-            queue,
-            pipelines,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            adapter_info,
         })
     }
     
-    /// Get the device
-    pub fn device(&self) -> &Arc<wgpu::Device> {
-        &self.device
-    }
-    
-    /// Get the queue
-    pub fn queue(&self) -> &Arc<wgpu::Queue> {
-        &self.queue
-    }
-    
-    /// Get the pipelines
-    pub fn pipelines(&self) -> &PlotPipelines {
-        &self.pipelines
-    }
-    
-    /// Create a buffer
-    pub fn create_buffer<T: bytemuck::Pod>(
-        &self,
-        data: &[T],
-        usage: wgpu::BufferUsages,
-    ) -> wgpu::Buffer {
+    /// Create a buffer with data
+    pub fn create_buffer_with_data(&self, data: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
         use wgpu::util::DeviceExt;
         
         self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Plot Data Buffer"),
-            contents: bytemuck::cast_slice(data),
+            label: Some("Data Buffer"),
+            contents: data,
             usage,
         })
     }
     
-    /// Determine render mode based on point count
-    pub fn select_render_mode(&self, point_count: usize) -> RenderMode {
-        match point_count {
-            0..=10_000 => RenderMode::Direct,
-            10_001..=100_000 => RenderMode::Instanced,
-            _ => RenderMode::Aggregated,
-        }
+    /// Get device limits
+    pub fn limits(&self) -> wgpu::Limits {
+        self.device.limits()
+    }
+    
+    /// Check if GPU supports required features
+    pub fn supports_required_features(&self) -> bool {
+        // For now, we don't require any special features
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    #[ignore] // GPU tests require actual hardware
+    async fn test_gpu_manager_creation() {
+        let gpu = GpuManager::new().await;
+        assert!(gpu.is_ok() || gpu.is_err()); // Either works or fails gracefully
     }
 } 

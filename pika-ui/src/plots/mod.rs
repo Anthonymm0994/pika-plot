@@ -5,6 +5,7 @@ mod line_plot;
 mod bar_plot;
 mod histogram_plot;
 mod heatmap_plot;
+mod box_plot;
 mod plot_renderer;
 
 pub use scatter_plot::ScatterPlot;
@@ -12,6 +13,7 @@ pub use line_plot::LinePlot;
 pub use bar_plot::BarPlot;
 pub use histogram_plot::HistogramPlot;
 pub use heatmap_plot::HeatmapPlot;
+pub use box_plot::BoxPlot;
 pub use plot_renderer::{PlotRenderer, render_plot};
 
 use pika_core::plots::{PlotConfig, PlotType};
@@ -38,6 +40,10 @@ pub fn render_plot_by_config(ui: &mut Ui, config: &PlotConfig, data: &arrow::rec
         }
         PlotType::Heatmap => {
             let plot = HeatmapPlot::from_config(config);
+            plot.render(ui, data);
+        }
+        PlotType::BoxPlot => {
+            let plot = BoxPlot::from_config(config);
             plot.render(ui, data);
         }
         _ => {

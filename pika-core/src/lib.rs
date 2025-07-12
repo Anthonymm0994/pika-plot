@@ -14,10 +14,21 @@ pub mod node;
 
 // Re-export commonly used types
 pub use error::{PikaError, Result};
-pub use events::{AppEvent, EventBus, WindowId};
-pub use snapshot::{WorkspaceSnapshot, SnapshotBuilder};
-pub use types::{NodeId, Point2, Size2};
-pub use node::{Node, Port, PortType, PortDirection, NodeContext};
+pub use types::{NodeId, PortId, Connection, Point2, Size2, Camera2D, WindowId};
+pub use plots::{PlotConfig, PlotType};
+pub use events::{Event, EventBus};
+pub use node::{Node, Port, PortType, PortDirection, NodeContext, DataNode};
+
+/// Prelude for common imports
+pub mod prelude {
+    pub use crate::{
+        error::{PikaError, Result},
+        types::{NodeId, PortId, Connection, Point2, Size2, Camera2D, WindowId},
+        plots::{PlotConfig, PlotType},
+        events::{Event, EventBus},
+        node::{Node, Port, PortType, PortDirection},
+    };
+}
 
 #[cfg(test)]
 mod tests {

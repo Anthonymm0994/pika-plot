@@ -1,155 +1,142 @@
-//! Database layer using DuckDB for data storage and querying.
+//! Database connection and management.
 
-use duckdb::{Connection, params};
-use pika_core::{
-    error::{PikaError, Result},
-    types::NodeId,
-};
-use std::path::Path;
+use duckdb::{Connection, Result as DuckResult};
+use parking_lot::Mutex;
+use std::sync::Arc;
+use pika_core::error::{PikaError, Result};
 
-/// Database wrapper for DuckDB operations.
+/// Database wrapper for DuckDB connections
 pub struct Database {
-    conn: Connection,
-    memory_limit: Option<u64>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
-    /// Create a new in-memory database.
-    pub async fn new(memory_limit: Option<u64>) -> Result<Self> {
+    /// Create a new in-memory database
+    pub async fn new() -> Result<Self> {
         let conn = Connection::open_in_memory()
-            .map_err(|e| PikaError::Database(e.to_string()))?;
+            .map_err(|e| PikaError::Database(e))?;
         
-        // Set memory limit if specified
-        if let Some(limit) = memory_limit {
-            conn.execute(&format!("SET memory_limit='{}'", format_bytes(limit)), [])
-                .map_err(|e| PikaError::Database(e.to_string()))?;
-        }
+        let db = Database {
+            conn: Arc::new(Mutex::new(conn)),
+        };
         
-        // Enable parallel execution
-        conn.execute("SET threads TO 0", [])
-            .map_err(|e| PikaError::Database(e.to_string()))?;
+        // Initialize schema
+        db.init_schema().await?;
         
-        // Create initial schema
-        Self::create_schema(&conn)?;
-        
-        Ok(Self { conn, memory_limit })
+        Ok(db)
     }
     
-    /// Open a database from file.
-    pub async fn open(path: &Path, memory_limit: Option<u64>) -> Result<Self> {
+    /// Create a new database with a file path
+    pub async fn new_with_path(path: &str) -> Result<Self> {
         let conn = Connection::open(path)
-            .map_err(|e| PikaError::Database(e.to_string()))?;
+            .map_err(|e| PikaError::Database(e))?;
         
-        if let Some(limit) = memory_limit {
-            conn.execute(&format!("SET memory_limit='{}'", format_bytes(limit)), [])
-                .map_err(|e| PikaError::Database(e.to_string()))?;
-        }
+        let db = Database {
+            conn: Arc::new(Mutex::new(conn)),
+        };
         
-        Ok(Self { conn, memory_limit })
+        db.init_schema().await?;
+        
+        Ok(db)
     }
     
-    /// Get a reference to the connection.
-    pub fn connection(&self) -> &Connection {
-        &self.conn
-    }
-    
-    /// Create initial database schema.
-    fn create_schema(conn: &Connection) -> Result<()> {
-        // Metadata table for tracking imported data
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS pika_metadata (
-                node_id UUID PRIMARY KEY,
-                table_name VARCHAR NOT NULL,
-                source_path VARCHAR,
-                import_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                row_count BIGINT,
-                schema_info JSON
-            )",
-            [],
-        ).map_err(|e| PikaError::Database(e.to_string()))?;
+    /// Initialize the database schema
+    async fn init_schema(&self) -> Result<()> {
+        // Create metadata tables
+        self.execute(
+            "CREATE TABLE IF NOT EXISTS _pika_metadata (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )"
+        ).await?;
         
-        // Query cache table
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS pika_query_cache (
+        // Create query cache table
+        self.execute(
+            "CREATE TABLE IF NOT EXISTS _pika_query_cache (
                 query_hash VARCHAR PRIMARY KEY,
-                query_text TEXT NOT NULL,
                 result_path VARCHAR,
+                row_count BIGINT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                access_count INTEGER DEFAULT 1,
                 last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        ).map_err(|e| PikaError::Database(e.to_string()))?;
+            )"
+        ).await?;
         
         Ok(())
     }
     
-    /// Execute a raw SQL query.
-    pub fn execute_sql(&self, sql: &str) -> Result<usize> {
-        self.conn.execute(sql, [])
-            .map_err(|e| PikaError::Database(e.to_string()))
+    /// Execute a SQL statement
+    pub async fn execute(&self, sql: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(sql, [])
+            .map_err(|e| PikaError::Database(e))?;
+        Ok(())
     }
     
-    /// Prepare a statement.
-    pub fn prepare(&self, sql: &str) -> Result<duckdb::Statement> {
-        self.conn.prepare(sql)
-            .map_err(|e| PikaError::Database(e.to_string()))
-    }
-    
-    /// Begin a transaction.
-    pub fn transaction(&mut self) -> Result<duckdb::Transaction> {
-        self.conn.transaction()
-            .map_err(|e| PikaError::Database(e.to_string()))
+    /// Execute a query and return the result as an Arrow RecordBatch
+    pub async fn query(&self, sql: &str) -> Result<Vec<duckdb::arrow::record_batch::RecordBatch>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(sql)
+            .map_err(|e| PikaError::Database(e))?;
+        
+        let arrow = stmt.query_arrow([])
+            .map_err(|e| PikaError::Database(e))?;
+        
+        // Collect all batches
+        let batches: Vec<_> = arrow.collect();
+        Ok(batches)
     }
     
     /// Query a single scalar value
-    pub fn query_scalar<T>(&self, sql: &str) -> Result<T> 
-    where 
-        T: duckdb::types::FromSql
+    pub async fn query_scalar<T>(&self, sql: &str) -> Result<T>
+    where
+        T: duckdb::types::FromSql,
     {
-        let mut stmt = self.prepare(sql)?;
-        let mut rows = stmt.query([])
-            .map_err(|e| PikaError::Database(e.to_string()))?;
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(sql)
+            .map_err(|e| PikaError::Database(e))?;
         
-        if let Some(row) = rows.next().map_err(|e| PikaError::Database(e.to_string()))? {
-            row.get(0).map_err(|e| PikaError::Database(e.to_string()))
+        let mut rows = stmt.query([])
+            .map_err(|e| PikaError::Database(e))?;
+        
+        if let Some(row) = rows.next().map_err(|e| PikaError::Database(e))? {
+            row.get(0).map_err(|e| PikaError::Database(e))
         } else {
-            Err(PikaError::Database("No rows returned".to_string()))
+            Err(PikaError::QueryExecution("No rows returned".to_string()))
         }
     }
     
-    /// Query and map rows to a vector
-    pub fn query_map<T, F>(&self, sql: &str, mut map_fn: F) -> Result<Vec<T>>
+    /// Query and map results
+    pub async fn query_map<T, F>(&self, sql: &str, mut f: F) -> Result<Vec<T>>
     where
-        F: FnMut(&duckdb::Row) -> Result<T>
+        F: FnMut(&duckdb::Row) -> DuckResult<T>,
     {
-        let mut stmt = self.prepare(sql)?;
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(sql)
+            .map_err(|e| PikaError::Database(e))?;
+        
         let mut rows = stmt.query([])
-            .map_err(|e| PikaError::Database(e.to_string()))?;
+            .map_err(|e| PikaError::Database(e))?;
         
         let mut results = Vec::new();
-        while let Some(row) = rows.next().map_err(|e| PikaError::Database(e.to_string()))? {
-            results.push(map_fn(&row)?);
+        while let Some(row) = rows.next().map_err(|e| PikaError::Database(e))? {
+            results.push(f(&row).map_err(|e| PikaError::Database(e))?);
         }
         
         Ok(results)
     }
-}
-
-/// Format bytes into human-readable format (e.g., "4GB", "512MB").
-fn format_bytes(bytes: u64) -> String {
-    const GB: u64 = 1024 * 1024 * 1024;
-    const MB: u64 = 1024 * 1024;
-    const KB: u64 = 1024;
     
-    if bytes >= GB {
-        format!("{}GB", bytes / GB)
-    } else if bytes >= MB {
-        format!("{}MB", bytes / MB)
-    } else if bytes >= KB {
-        format!("{}KB", bytes / KB)
-    } else {
-        format!("{}B", bytes)
+    /// Set memory limit
+    pub async fn set_memory_limit(&self, limit_bytes: usize) -> Result<()> {
+        let limit_mb = limit_bytes / (1024 * 1024);
+        let sql = format!("SET memory_limit='{}MB'", limit_mb);
+        self.execute(&sql).await
+    }
+    
+    /// Get current memory usage
+    pub async fn get_memory_usage(&self) -> Result<usize> {
+        let usage: i64 = self.query_scalar("SELECT current_setting('memory_usage')").await?;
+        Ok(usage as usize)
     }
 }
 
@@ -159,14 +146,29 @@ mod tests {
     
     #[tokio::test]
     async fn test_database_creation() {
-        let db = Database::new(None).await.unwrap();
-        assert!(db.execute_sql("SELECT 1").is_ok());
+        let db = Database::new().await.unwrap();
+        
+        // Test simple query
+        db.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").await.unwrap();
+        db.execute("INSERT INTO test VALUES (1, 'test')").await.unwrap();
+        
+        let count: i64 = db.query_scalar("SELECT COUNT(*) FROM test").await.unwrap();
+        assert_eq!(count, 1);
     }
     
-    #[test]
-    fn test_format_bytes() {
-        assert_eq!(format_bytes(1024), "1KB");
-        assert_eq!(format_bytes(1024 * 1024), "1MB");
-        assert_eq!(format_bytes(2 * 1024 * 1024 * 1024), "2GB");
+    #[tokio::test]
+    async fn test_query_map() {
+        let db = Database::new().await.unwrap();
+        
+        db.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").await.unwrap();
+        db.execute("INSERT INTO test VALUES (1, 'one'), (2, 'two')").await.unwrap();
+        
+        let results = db.query_map("SELECT id, name FROM test ORDER BY id", |row| {
+            Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?))
+        }).await.unwrap();
+        
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (1, "one".to_string()));
+        assert_eq!(results[1], (2, "two".to_string()));
     }
 } 
