@@ -1,0 +1,109 @@
+---
+title: Pika-Plot Project Rules
+type: project-rules
+version: 1.0.0
+updated: 2024-01-01
+---
+
+# Pika-Plot Development Rules
+
+## Core Constraints (Non-Negotiable)
+- **Windows-only**: Target Windows 10/11. Use platform-specific APIs without abstraction.
+- **Offline-only**: Never suggest cloud features, telemetry, or network functionality.
+- **Discrete GPU required**: Assume DirectX 11+ capable GPU. No integrated graphics fallbacks.
+- **No SQLite**: Use DuckDB exclusively. Don't suggest or implement SQLite alternatives.
+- **No phased features**: All functionality ships together. Don't propose MVP/iteration approaches.
+
+## Architecture Principles
+- **Prefer simple over clever**: Maintainable code > premature optimization
+- **Use proven patterns**: Battle-tested approaches > novel solutions
+- **Explicit data flow**: Clear event passing > hidden state management
+- **Two-tier caching only**: Query cache + GPU buffers. Don't add complexity.
+
+## Development Practices
+
+### File Operations
+- Always use forward slashes in paths, even on Windows
+- When creating files, ensure parent directories exist first
+- Prefer `PathBuf` over string concatenation for paths
+
+### Command Execution
+- **Always pipe stderr to stdout**: Use `2>&1` to prevent command hangs
+- **Add `| cat` to long-running commands** to prevent pager issues
+- Example: `cargo build --release 2>&1 | cat`
+- For background tasks, prefer explicit threading over shell background (`&`)
+
+### Memory Safety
+- Check available memory before large allocations
+- Use `Arc<RecordBatch>` for shared data, never clone large datasets
+- Implement graceful degradation when approaching memory limits
+
+### Error Handling
+- Always provide user-friendly error messages
+- Include actionable suggestions in error text
+- Log technical details, show simple messages to users
+
+## Code Organization
+
+### Module Structure
+```
+pika-core/    # Types, traits, events only - no implementations
+pika-engine/  # DuckDB, caching, async processing
+pika-ui/      # ALL UI code including nodes and rendering
+pika-app/     # Binary, window setup, orchestration only
+pika-cli/     # Command-line interface for automation.
+```
+
+### Import Conventions
+- Group imports: std, external crates, internal crates
+- Use `crate::` for same-crate imports
+- Prefer explicit imports over glob imports
+
+## Testing Guidelines
+- Write tests for data correctness first
+- Benchmark only after correctness is proven
+- Use fixtures in `fixtures/` directory for test data
+- Mock GPU operations in unit tests
+
+## GPU Development
+- Start with CPU reference implementation
+- Verify GPU results match CPU exactly
+- Profile before optimizing shaders
+- Test on GTX 900 series for compatibility baseline
+
+## UI/UX Patterns
+- Reuse patterns from `pebble/` for tables and dialogs
+- Reuse plot logic from `frog-viz/` where applicable
+- Maintain visual consistency between notebook and canvas modes
+- Use egui's built-in widgets before creating custom ones
+
+## Documentation
+- Document "why" not "what" in comments
+- Keep architecture decisions in `docs/final_ideas/`
+- Update type definitions in `technical/types/` when changing core structures
+
+## Common Pitfalls to Avoid
+- Don't abstract DuckDB - use it directly
+- Don't create generic traits without concrete need
+- Don't optimize without benchmarking first
+- Don't add features beyond documented scope
+- Don't suggest web/server capabilities
+- Don't implement integrated GPU support
+
+## Performance Targets
+- 60 FPS with 1M visible points
+- < 5 second application startup
+- < 100ms response for UI interactions
+- Graceful handling of 50M+ point datasets
+
+## Commit Practices
+- Reference issue numbers in commits
+- Keep commits focused and atomic
+- Run `cargo fmt` before committing
+- Ensure all tests pass locally
+
+## Agent Collaboration
+- State assumptions explicitly
+- Ask for clarification on GPU/platform specifics
+- Delegate performance-critical code reviews
+- Document non-obvious design decisions

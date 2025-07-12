@@ -1,0 +1,211 @@
+---
+title: Memory Management Guidance
+type: development-rules
+version: 1.0.0
+updated: 2024-01-01
+---
+
+# Memory Management Guidelines for Pika-Plot
+
+## Critical Memory Principles
+
+### Always Check Before Allocating
+```rust
+// GOOD: Check available memory first
+if memory_monitor.available_bytes() < estimated_size * 1.2 {
+    return Err(PikaError::InsufficientMemory { ... });
+}
+
+// BAD: Allocate and hope for the best
+let huge_vec = vec![0u8; gigabytes];
+```
+
+### Use Arc for Shared Data
+```rust
+// GOOD: Share via Arc
+let data = Arc::new(record_batch);
+cache.insert(query_id, data.clone());
+
+// BAD: Clone large data
+let data_copy = record_batch.clone();
+```
+
+## Memory Thresholds
+
+### System RAM Usage
+- **< 60%**: Normal operation
+- **60-80%**: Show memory indicator in UI
+- **80-90%**: Warn user, suggest closing plots
+- **> 90%**: Block new operations, force cleanup
+
+### GPU VRAM Usage
+- **< 70%**: Full quality rendering
+- **70-85%**: Switch to lower LOD
+- **85-95%**: Use aggregated rendering only
+- **> 95%**: Refuse new plot creation
+
+## Data Loading Strategies
+
+### CSV Import
+```rust
+// Stream large files, don't load entirely
+let reader = csv::ReaderBuilder::new()
+    .buffer_capacity(8 * 1024) // 8KB chunks
+    .from_path(path)?;
+
+// Let DuckDB handle the streaming
+conn.execute("COPY table FROM 'file.csv' (AUTO_DETECT TRUE)")?;
+```
+
+### Query Results
+```rust
+// Estimate result size before executing
+let row_estimate = conn.query_row(
+    "SELECT COUNT(*) FROM (...) AS estimate",
+    [],
+    |row| row.get(0)
+)?;
+
+if row_estimate * bytes_per_row > memory_limit {
+    // Suggest adding LIMIT or aggregation
+}
+```
+
+## Caching Strategies
+
+### Query Cache
+- Use content-based keys (normalized SQL)
+- Set max cache size to 20% of system RAM
+- Evict LRU when pressure detected
+- Never cache results > 100MB
+
+### GPU Buffers
+- Only keep buffers for visible plots
+- Release immediately when plot hidden
+- Use staging buffers for upload
+- Implement buffer pooling for reuse
+
+## Memory Monitoring
+
+### Windows-Specific APIs
+```rust
+use windows::Win32::System::SystemInformation::*;
+
+fn get_memory_status() -> MemoryStatus {
+    let mut status = MEMORYSTATUSEX::default();
+    status.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+    
+    unsafe {
+        GlobalMemoryStatusEx(&mut status);
+    }
+    
+    MemoryStatus {
+        total_physical: status.ullTotalPhys,
+        available_physical: status.ullAvailPhys,
+        total_virtual: status.ullTotalVirtual,
+        available_virtual: status.ullAvailVirtual,
+    }
+}
+```
+
+### VRAM Monitoring
+- Use DXGI for DirectX devices
+- Poll every 5 seconds during operations
+- Cache results for 1 second
+- Fallback to estimates if API fails
+
+## Graceful Degradation
+
+### When Memory is Low
+1. **First**: Clear query cache
+2. **Second**: Release hidden plot buffers
+3. **Third**: Downsample visible plots
+4. **Fourth**: Show modal suggesting restart
+
+### Automatic Optimizations
+```rust
+// Adjust plot quality based on memory
+match memory_pressure_level() {
+    Low => PlotQuality::Full,
+    Medium => PlotQuality::Reduced { sample_rate: 0.5 },
+    High => PlotQuality::Aggregated { tile_size: 16 },
+    Critical => PlotQuality::Outline,
+}
+```
+
+## Testing Memory Scenarios
+
+### Unit Tests
+```rust
+#[test]
+fn test_memory_limit_enforcement() {
+    let monitor = MemoryMonitor::new()
+        .with_mock_memory(4_000_000_000); // 4GB
+    
+    // Should fail
+    assert!(monitor.check_allocation(5_000_000_000).is_err());
+}
+```
+
+### Integration Tests
+- Test with 2GB, 8GB, 16GB, 32GB configurations
+- Simulate memory pressure during operations
+- Verify graceful degradation works
+- Check for memory leaks over time
+
+## Common Memory Pitfalls
+
+### Avoid These Patterns
+- Loading entire CSV into memory
+- Keeping all query results cached
+- Creating temporary large buffers
+- Forgetting to drop GPU resources
+- Cloning RecordBatch unnecessarily
+
+### Prefer These Patterns
+- Streaming data processing
+- Lazy evaluation where possible
+- Buffer pooling and reuse
+- Explicit resource cleanup
+- Reference counting with Arc
+
+## Memory Profiling
+
+### Development Tools
+```bash
+# Use Windows Performance Toolkit
+cargo build --release
+wpr -start GeneralProfile
+./target/release/pika-app
+wpr -stop memory_trace.etl
+
+# Analyze with Windows Performance Analyzer
+wpa memory_trace.etl
+```
+
+### Runtime Diagnostics
+- Log memory usage every 30 seconds
+- Track allocation patterns
+- Identify memory spikes
+- Report leaked resources
+
+## User Communication
+
+### Memory Warnings
+```rust
+// Clear, actionable messages
+match memory_status {
+    MemoryWarning => {
+        show_toast("Memory usage high. Consider closing unused plots.");
+    }
+    MemoryCritical => {
+        show_modal("Low memory! Save your work and restart Pika-Plot.");
+    }
+}
+```
+
+### Progress Indicators
+- Show memory usage in status bar
+- Update during long operations
+- Indicate when using swap
+- Warn before operations that need lots of RAM

@@ -1,0 +1,11 @@
+Date,Product,Category,Quantity,Price,Revenue
+2024-01-01,Laptop,Electronics,5,999.99,4999.95
+2024-01-01,Mouse,Accessories,20,29.99,599.80
+2024-01-02,Keyboard,Accessories,15,79.99,1199.85
+2024-01-02,Monitor,Electronics,8,399.99,3199.92
+2024-01-03,Laptop,Electronics,3,999.99,2999.97
+2024-01-03,USB Cable,Accessories,50,9.99,499.50
+2024-01-04,Webcam,Electronics,12,129.99,1559.88
+2024-01-04,Mouse Pad,Accessories,30,19.99,599.70
+2024-01-05,Laptop,Electronics,7,999.99,6999.93
+2024-01-05,HDMI Cable,Accessories,25,24.99,624.75 

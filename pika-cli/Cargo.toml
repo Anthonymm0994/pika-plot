@@ -1,0 +1,43 @@
+[package]
+name = "pika-cli"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[[bin]]
+name = "pika"
+path = "src/main.rs"
+
+[dependencies]
+# Local crates
+pika-core = { path = "../pika-core" }
+pika-engine = { path = "../pika-engine" }
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Progress bars
+indicatif = "0.17"
+
+# Table output
+comfy-table = "7.1"
+
+# System info
+num_cpus = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }

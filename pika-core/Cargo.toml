@@ -1,0 +1,34 @@
+[package]
+name = "pika-core"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ron = { workspace = true }
+thiserror = "1.0"
+uuid = { version = "1.5", features = ["v4", "serde"] }
+tracing = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+dunce = "1.0"
+
+# Data types
+# Use DuckDB's arrow re-export in pika-engine instead
+# arrow = { workspace = true }
+duckdb = { workspace = true }
+
+# UI types (needed for egui types in traits)
+egui = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.9"

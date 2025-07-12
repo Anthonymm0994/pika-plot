@@ -1,0 +1,51 @@
+date,product,category,quantity,price,customer_id,region,notes
+2024-01-01,Widget A,Electronics,5,29.99,CUST001,North,Regular sale
+2024-01-01,Gadget B,Electronics,,49.99,CUST002,South,Missing quantity
+2024-01-02,Tool C,Hardware,10,15.50,,East,Anonymous purchase
+2024-01-02,Widget A,Electronics,2,29.99,CUST004,West,
+2024-01-03,Gadget B,Electronics,1,49.99,CUST005,North,Returned item
+2024-01-03,Tool C,Hardware,5,NULL,CUST001,South,Price error
+2024-01-04,Widget D,Electronics,8,39.99,CUST002,,No region data
+2024-01-04,Gadget E,Electronics,4,59.99,CUST003,West,Bulk order
+2024-01-05,,Hardware,12,12.99,CUST004,North,Product name missing
+2024-01-05,Widget A,Electronics,6,29.99,CUST005,South,
+2024-01-06,Gadget B,Electronics,2,49.99,CUST006,East,VIP customer
+2024-01-06,Tool C,Hardware,7,15.50,CUST007,West,
+2024-01-07,Widget D,Electronics,3,39.99,CUST008,North,Discount applied
+2024-01-07,Gadget E,Electronics,9,59.99,CUST009,South,
+2024-01-08,Tool F,Hardware,4,12.99,CUST010,East,
+2024-01-08,Widget A,Electronics,11,29.99,CUST006,West,Repeat customer
+2024-01-09,Gadget B,Electronics,5,49.99,CUST007,North,
+2024-01-09,Tool C,Hardware,8,15.50,CUST008,South,Weekend sale
+2024-01-10,Widget D,Electronics,2,39.99,CUST009,East,
+2024-01-10,Gadget E,Electronics,6,59.99,CUST010,West,Gift purchase
+2024-01-11,Tool F,Hardware,10,12.99,CUST011,North,
+2024-01-11,Widget A,Electronics,3,29.99,CUST012,South,Online order
+2024-01-12,Gadget B,Electronics,7,49.99,CUST013,East,
+2024-01-12,Tool C,Hardware,4,15.50,CUST014,West,Store pickup
+2024-01-13,Widget D,Electronics,9,39.99,CUST015,North,
+2024-01-13,Gadget E,Electronics,1,59.99,CUST011,South,Exchange
+2024-01-14,Tool F,Hardware,5,12.99,CUST012,East,
+2024-01-14,Widget A,Electronics,8,29.99,CUST013,West,Warranty purchase
+2024-01-15,Gadget B,Electronics,2,49.99,CUST014,North,
+2024-01-15,Tool C,Hardware,6,15.50,CUST015,South,Corporate account
+2024-01-16,Widget D,Electronics,4,39.99,CUST016,East,
+2024-01-16,Gadget E,Electronics,10,59.99,CUST017,West,
+2024-01-17,Tool F,Hardware,3,12.99,CUST018,North,Clearance item
+2024-01-17,Widget A,Electronics,7,29.99,CUST019,South,
+2024-01-18,Gadget B,Electronics,5,49.99,CUST020,East,Special order
+2024-01-18,Tool C,Hardware,9,15.50,CUST016,West,
+2024-01-19,Widget D,Electronics,1,39.99,CUST017,North,Last unit
+2024-01-19,Gadget E,Electronics,8,59.99,CUST018,South,
+2024-01-20,Tool F,Hardware,2,12.99,CUST019,East,Damaged box discount
+2024-01-20,Widget A,Electronics,6,29.99,CUST020,West,
+2024-01-21,Gadget B,Electronics,4,49.99,CUST021,North,New customer
+2024-01-21,Tool C,Hardware,10,15.50,CUST022,South,
+2024-01-22,Widget D,Electronics,3,39.99,CUST023,East,Referral discount
+2024-01-22,Gadget E,Electronics,7,59.99,CUST024,West,
+2024-01-23,Tool F,Hardware,5,12.99,CUST025,North,Member price
+2024-01-23,Widget A,Electronics,9,29.99,CUST021,South,
+2024-01-24,Gadget B,Electronics,1,49.99,CUST022,East,Flash sale
+2024-01-24,Tool C,Hardware,8,15.50,CUST023,West,
+2024-01-25,Widget D,Electronics,2,39.99,CUST024,North,End of month sale
+2024-01-25,Gadget E,Electronics,6,59.99,CUST025,South,Final inventory 

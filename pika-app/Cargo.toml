@@ -1,0 +1,37 @@
+[package]
+name = "pika-app"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[[bin]]
+name = "pika-plot"
+path = "src/main.rs"
+
+[dependencies]
+# Local crates
+pika-core = { path = "../pika-core" }
+pika-engine = { path = "../pika-engine" }
+pika-ui = { path = "../pika-ui" }
+
+# UI framework
+eframe = { workspace = true }
+egui = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+flume = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Windows-specific
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
