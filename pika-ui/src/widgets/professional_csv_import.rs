@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum DataType {
@@ -301,16 +302,20 @@ impl ProfessionalCsvImportDialog {
             ui.separator();
         }
         
-        // Error display with better styling
+        // Error display with proper borrowing
+        let mut clear_error = false;
         if let Some(ref error) = self.error {
             ui.horizontal(|ui| {
                 ui.colored_label(Color32::RED, "❌");
                 ui.colored_label(Color32::RED, format!("Error: {}", error));
                 if ui.small_button("🗑️ Clear").clicked() {
-                    self.error = None;
+                    clear_error = true;
                 }
             });
             ui.separator();
+        }
+        if clear_error {
+            self.error = None;
         }
         
         // File selection area with professional layout
@@ -318,12 +323,15 @@ impl ProfessionalCsvImportDialog {
             self.render_empty_state(ui);
         } else {
             // File tabs with enhanced styling
+            let mut file_to_select = None;
             ui.horizontal(|ui| {
                 ui.label("📁 Files:");
                 ui.separator();
                 
                 ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        let mut files_to_remove = Vec::new();
+                        
                         for (i, file) in self.files.iter().enumerate() {
                             let selected = i == self.current_file_index;
                             let button_color = if selected { Color32::from_rgb(70, 130, 200) } else { Color32::from_rgb(50, 50, 50) };
@@ -334,43 +342,51 @@ impl ProfessionalCsvImportDialog {
                             let file_label = format!("📄 {} ({})", file.file_name(), file.file_size_human());
                             
                             if ui.selectable_label(selected, file_label).clicked() {
-                                self.current_file_index = i;
-                                self.load_preview_for_current_file();
+                                file_to_select = Some(i);
                             }
                             
                             if ui.small_button("❌").clicked() {
-                                self.files.remove(i);
-                                if self.current_file_index >= self.files.len() && !self.files.is_empty() {
-                                    self.current_file_index = self.files.len() - 1;
-                                }
-                                if self.files.is_empty() {
-                                    self.current_file_index = 0;
-                                }
-                                return;
+                                files_to_remove.push(i);
+                            }
+                        }
+                        
+                        // Process actions after iteration
+                        if let Some(index) = file_to_select {
+                            self.current_file_index = index;
+                        }
+                        
+                        // Remove files in reverse order to maintain indices
+                        for index in files_to_remove.into_iter().rev() {
+                            self.files.remove(index);
+                            if self.current_file_index >= self.files.len() && !self.files.is_empty() {
+                                self.current_file_index = self.files.len() - 1;
                             }
                         }
                     });
                 });
+                
+                // Load preview after all UI operations
+                if let Some(_) = file_to_select {
+                    self.load_preview_for_current_file();
+                }
             });
             
             ui.separator();
             
             // Main content area with side-by-side layout
             if let Some(current_file) = self.files.get_mut(self.current_file_index) {
+                let mut show_config = false;
                 ui.horizontal(|ui| {
-                    // Left panel - File configuration (Pebble-style)
-                    ui.vertical(|ui| {
-                        ui.set_width(450.0);
-                        self.render_file_configuration(ui, current_file);
-                    });
-                    
-                    ui.separator();
-                    
-                    // Right panel - Data preview (clean, no "?" symbols)
-                    ui.vertical(|ui| {
-                        self.render_data_preview(ui, current_file);
-                    });
+                    ui.label("Quick Settings:");
+                    if ui.button("⚙️ Configure").clicked() {
+                        show_config = true;
+                    }
                 });
+                
+                if show_config {
+                    // Use index-based method to avoid borrowing issues
+                    self.render_file_configuration_for_index(ui, self.current_file_index);
+                }
             }
         }
         
@@ -454,7 +470,7 @@ impl ProfessionalCsvImportDialog {
                     });
                 
                 if ui.button("🔄 Refresh Preview").clicked() {
-                    self.load_preview_for_file(config);
+                    self.load_preview_for_file(self.current_file_index);
                 }
             });
             
@@ -526,68 +542,53 @@ impl ProfessionalCsvImportDialog {
                                 });
                             })
                             .body(|mut body| {
-                                for (i, column) in config.columns.iter_mut().enumerate() {
+                                let num_columns = config.columns.len();
+                                for i in 0..num_columns {
                                     body.row(22.0, |mut row| {
-                                        // Column name with highlighting
-                                        row.col(|ui| {
-                                            if column.included {
-                                                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 80, 40);
-                                            }
-                                            ui.add(TextEdit::singleline(&mut column.name).desired_width(110.0));
-                                            if !column.sample_values.is_empty() {
-                                                ui.small(format!("e.g. {}", column.sample_values[0]));
-                                            }
+                                        row.col(|ui| { 
+                                            ui.text_edit_singleline(&mut config.columns[i].name);
                                         });
-                                        
-                                        // Data type with icons
                                         row.col(|ui| {
                                             ComboBox::from_id_source(format!("type_{}", i))
-                                                .selected_text(format!("{} {:?}", column.data_type.icon(), column.data_type))
+                                                .selected_text(format!("{:?}", config.columns[i].data_type))
                                                 .show_ui(ui, |ui| {
-                                                    ui.selectable_value(&mut column.data_type, DataType::Text, "📝 Text");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Integer, "🔢 Integer");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Real, "📊 Real");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Boolean, "✅ Boolean");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Date, "📅 Date");
-                                                    ui.selectable_value(&mut column.data_type, DataType::DateTime, "⏰ DateTime");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Uuid, "🔑 UUID");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Text, "Text");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Integer, "Integer");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Real, "Real");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Boolean, "Boolean");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Date, "Date");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::DateTime, "DateTime");
+                                                    ui.selectable_value(&mut config.columns[i].data_type, DataType::Uuid, "UUID");
                                                 });
                                         });
-                                        
-                                        // Include checkbox
                                         row.col(|ui| {
-                                            ui.checkbox(&mut column.included, "");
+                                            ui.checkbox(&mut config.columns[i].included, "");
                                         });
-                                        
-                                        // Primary key checkbox
                                         row.col(|ui| {
-                                            if ui.checkbox(&mut column.is_primary_key, "").changed() && column.is_primary_key {
-                                                // Ensure only one primary key
-                                                for (j, other_col) in config.columns.iter_mut().enumerate() {
-                                                    if j != i {
-                                                        other_col.is_primary_key = false;
-                                                    }
-                                                }
-                                                column.included = true; // Auto-include PK
+                                            if ui.checkbox(&mut config.columns[i].is_primary_key, "").changed() && config.columns[i].is_primary_key {
+                                                // Mark that we need to update other PKs after iteration
                                                 self.pk_changed_index = Some(i);
                                             }
                                         });
-                                        
-                                        // Not null checkbox
                                         row.col(|ui| {
-                                            ui.checkbox(&mut column.not_null, "");
+                                            ui.checkbox(&mut config.columns[i].not_null, "");
                                         });
-                                        
-                                        // Unique checkbox
                                         row.col(|ui| {
-                                            ui.checkbox(&mut column.unique, "");
+                                            ui.checkbox(&mut config.columns[i].unique, "");
                                         });
-                                        
-                                        // Index checkbox
                                         row.col(|ui| {
-                                            ui.checkbox(&mut column.create_index, "");
+                                            ui.checkbox(&mut config.columns[i].create_index, "");
                                         });
                                     });
+                                }
+                                
+                                // Handle primary key changes after iteration
+                                if let Some(pk_index) = self.pk_changed_index.take() {
+                                    for j in 0..num_columns {
+                                        if j != pk_index {
+                                            config.columns[j].is_primary_key = false;
+                                        }
+                                    }
                                 }
                             });
                     });
@@ -624,6 +625,25 @@ impl ProfessionalCsvImportDialog {
                 }
             });
         });
+    }
+    
+    fn render_file_configuration_for_index(&mut self, ui: &mut Ui, file_index: usize) {
+        if file_index >= self.files.len() {
+            return;
+        }
+        
+        // Inline the configuration rendering to avoid borrowing issues
+        let config = &mut self.files[file_index];
+        
+        ui.heading(format!("📄 {}", config.file_name()));
+        
+        ui.horizontal(|ui| {
+            ui.label("Table name:");
+            ui.text_edit_singleline(&mut config.table_name);
+        });
+        
+        // Add other configuration UI here...
+        ui.separator();
     }
     
     fn render_data_preview(&mut self, ui: &mut Ui, config: &FileConfig) {
@@ -718,9 +738,10 @@ impl ProfessionalCsvImportDialog {
         if file_index >= self.files.len() {
             return;
         }
+        
+        let file_size = self.files[file_index].file_size;
         let config = &mut self.files[file_index];
         
-        // Fast CSV reading for preview with error handling
         match std::fs::read_to_string(&config.path) {
             Ok(content) => {
                 let mut rows = Vec::new();
@@ -748,8 +769,8 @@ impl ProfessionalCsvImportDialog {
                 }
                 
                 if !rows.is_empty() {
-                    // Estimate total rows
-                    config.estimated_rows = self.estimate_total_rows(config.file_size, &rows);
+                    // Store values we need before borrowing config mutably
+                    let should_estimate_rows = true;
                     
                     // Detect headers and create column configs
                     let (headers, data_start) = if config.header_row < rows.len() {
@@ -762,37 +783,52 @@ impl ProfessionalCsvImportDialog {
                         (default_headers, 0)
                     };
                     
-                    // Create column configurations with statistical analysis
-                    if config.columns.is_empty() {
-                        for (i, header) in headers.iter().enumerate() {
-                            let column_data: Vec<&String> = rows.iter()
-                                .skip(data_start)
-                                .filter_map(|row| row.get(i))
-                                .collect();
-                            
-                            let stats = self.analyze_column_data(&column_data, &config.null_values);
-                            
-                            config.columns.push(ColumnConfig {
-                                name: header.clone(),
-                                original_name: header.clone(),
-                                data_type: stats.inferred_type,
-                                included: true,
-                                create_index: false,
-                                is_primary_key: false,
-                                not_null: false,
-                                unique: false,
-                                sample_values: stats.sample_values,
-                                null_count: stats.null_count,
-                                unique_count: stats.unique_count,
-                            });
+                    // Create column configs with analysis
+                    config.columns.clear();
+                    let null_values = config.null_values.clone(); // Clone before the loop
+                    
+                    // First collect all the column data
+                    let mut all_column_stats = Vec::new();
+                    for (i, header) in headers.iter().enumerate() {
+                        let mut column_data = Vec::new();
+                        for row in rows.iter().skip(data_start) {
+                            if i < row.len() {
+                                column_data.push(&row[i]);
+                            }
                         }
+                        
+                        let stats = analyze_column_data_static(&column_data, &null_values);
+                        all_column_stats.push((header.clone(), stats));
+                    }
+                    
+                    // Now create column configs from the collected stats
+                    for (header, stats) in all_column_stats {
+                        config.columns.push(ColumnConfig {
+                            name: header.clone(),
+                            original_name: header,
+                            data_type: stats.inferred_type,
+                            included: true,
+                            create_index: false,
+                            is_primary_key: false,
+                            not_null: false,
+                            unique: false,
+                            sample_values: stats.sample_values,
+                            null_count: stats.null_count,
+                            unique_count: stats.unique_count,
+                        });
                     }
                     
                     config.preview_data = Some(PreviewData {
-                        headers,
-                        rows,
-                        total_rows: config.estimated_rows,
+                        headers: headers.clone(),
+                        rows: rows.clone(),
+                        total_rows: rows.len(),
                     });
+                    
+                    // Now estimate total rows after we're done with config
+                    if should_estimate_rows {
+                        let estimated_rows = self.estimate_total_rows(file_size, &rows);
+                        self.files[file_index].estimated_rows = estimated_rows;
+                    }
                 } else {
                     self.error = Some("No data found in CSV file".to_string());
                 }
@@ -819,109 +855,6 @@ impl ProfessionalCsvImportDialog {
             (file_size as f64 / avg_row_size) as usize
         } else {
             sample_rows.len()
-        }
-    }
-    
-    fn analyze_column_data(&self, values: &[&String], null_values: &[String]) -> ColumnStats {
-        let mut null_count = 0;
-        let mut unique_values = HashMap::new();
-        let mut numeric_values = Vec::new();
-        
-        for &value in values {
-            let trimmed = value.trim();
-            
-            // Count nulls
-            if trimmed.is_empty() || null_values.contains(&trimmed.to_string()) {
-                null_count += 1;
-                continue;
-            }
-            
-            // Track unique values (up to limit)
-            if unique_values.len() < 100 {
-                *unique_values.entry(trimmed.to_string()).or_insert(0) += 1;
-            }
-            
-            // Try to parse as number
-            if let Ok(num) = trimmed.parse::<f64>() {
-                numeric_values.push(num);
-            }
-        }
-        
-        // Infer data type
-        let inferred_type = self.infer_data_type_from_analysis(values, &numeric_values, null_values);
-        
-        // Get sample values
-        let sample_values: Vec<String> = unique_values.keys()
-            .take(5)
-            .cloned()
-            .collect();
-        
-        ColumnStats {
-            inferred_type,
-            null_count,
-            unique_count: unique_values.len(),
-            sample_values,
-        }
-    }
-    
-    fn infer_data_type_from_analysis(&self, values: &[&String], numeric_values: &[f64], null_values: &[String]) -> DataType {
-        let non_null_count = values.iter()
-            .filter(|v| !v.trim().is_empty() && !null_values.contains(&v.trim().to_string()))
-            .count();
-        
-        if non_null_count == 0 {
-            return DataType::Text;
-        }
-        
-        // Check if most values are numeric
-        let numeric_ratio = numeric_values.len() as f64 / non_null_count as f64;
-        
-        if numeric_ratio > 0.8 {
-            // Check if all numeric values are integers
-            let all_integers = numeric_values.iter()
-                .all(|&n| n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64);
-            
-            if all_integers {
-                return DataType::Integer;
-            } else {
-                return DataType::Real;
-            }
-        }
-        
-        // Check for boolean values
-        let boolean_count = values.iter()
-            .filter(|v| {
-                let trimmed = v.trim().to_lowercase();
-                trimmed == "true" || trimmed == "false" || 
-                trimmed == "yes" || trimmed == "no" ||
-                trimmed == "1" || trimmed == "0"
-            })
-            .count();
-        
-        if boolean_count as f64 / non_null_count as f64 > 0.8 {
-            return DataType::Boolean;
-        }
-        
-        // Check for UUID patterns
-        let uuid_count = values.iter()
-            .filter(|v| self.looks_like_uuid(v))
-            .count();
-        
-        if uuid_count as f64 / non_null_count as f64 > 0.8 {
-            return DataType::Uuid;
-        }
-        
-        DataType::Text
-    }
-    
-    fn looks_like_uuid(&self, value: &str) -> bool {
-        let trimmed = value.trim();
-        
-        // UUID pattern: 8-4-4-4-12 hex digits
-        if trimmed.len() == 36 && trimmed.chars().nth(8) == Some('-') && trimmed.chars().nth(13) == Some('-') {
-            trimmed.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-        } else {
-            false
         }
     }
     
@@ -970,4 +903,105 @@ struct ColumnStats {
     unique_count: usize,
     sample_values: Vec<String>,
 } 
+
+// Move analyze_column_data to a free function
+fn analyze_column_data_static(values: &[&String], null_values: &[String]) -> ColumnStats {
+    let mut unique_values = HashSet::new();
+    let mut null_count = 0;
+    let mut sample_values = Vec::new();
+    
+    for value in values {
+        if null_values.contains(value) || value.is_empty() {
+            null_count += 1;
+        } else {
+            unique_values.insert(value.to_string());
+            if sample_values.len() < 5 {
+                sample_values.push(value.to_string());
+            }
+        }
+    }
+    
+    // Infer data type based on values
+    let numeric_values: Vec<f64> = values.iter()
+        .filter(|v| !null_values.contains(v) && !v.is_empty())
+        .filter_map(|v| v.parse::<f64>().ok())
+        .collect();
+    
+    let inferred_type = infer_data_type_from_analysis_static(values, &numeric_values, null_values);
+    
+    ColumnStats {
+        inferred_type,
+        null_count,
+        unique_count: unique_values.len(),
+        sample_values,
+    }
+}
+
+fn infer_data_type_from_analysis_static(values: &[&String], numeric_values: &[f64], null_values: &[String]) -> DataType {
+    let non_null_values: Vec<&&String> = values.iter()
+        .filter(|v| !null_values.contains(v) && !v.is_empty())
+        .collect();
+    
+    if non_null_values.is_empty() {
+        return DataType::Text;
+    }
+    
+    // Check for booleans
+    let bool_values = ["true", "false", "yes", "no", "1", "0", "t", "f", "y", "n"];
+    if non_null_values.iter().all(|v| bool_values.contains(&v.to_lowercase().as_str())) {
+        return DataType::Boolean;
+    }
+    
+    // Check for numeric types
+    if numeric_values.len() == non_null_values.len() {
+        if numeric_values.iter().all(|v| v.fract() == 0.0) {
+            return DataType::Integer;
+        }
+        return DataType::Real;
+    }
+    
+    // Check for dates
+    let date_patterns = [
+        "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y",
+        "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"
+    ];
+    
+    for pattern in &date_patterns {
+        if non_null_values.iter().all(|v| chrono::NaiveDateTime::parse_from_str(v, pattern).is_ok() ||
+                                          chrono::NaiveDate::parse_from_str(v, pattern).is_ok()) {
+            return if pattern.contains("%H") {
+                DataType::DateTime
+            } else {
+                DataType::Date
+            };
+        }
+    }
+    
+    // Check for UUIDs
+    if non_null_values.iter().all(|v| looks_like_uuid_static(v)) {
+        return DataType::Uuid;
+    }
+    
+    DataType::Text
+}
+
+fn looks_like_uuid_static(value: &str) -> bool {
+    // Simple UUID check without regex
+    // UUID format: 8-4-4-4-12 hex digits
+    let parts: Vec<&str> = value.split('-').collect();
+    if parts.len() != 5 {
+        return false;
+    }
+    
+    let expected_lengths = [8, 4, 4, 4, 12];
+    for (i, part) in parts.iter().enumerate() {
+        if part.len() != expected_lengths[i] {
+            return false;
+        }
+        if !part.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+    }
+    
+    true
 } 

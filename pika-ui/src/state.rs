@@ -1,12 +1,12 @@
 //! Application state management.
 
 use pika_core::{
-    types::{NodeId, TableInfo, QueryResult},
-    plots::PlotConfig,
-    nodes::Node,
+    plots::{PlotConfig, PlotType},
+    types::{TableInfo, QueryResult},
+    NodeId,
 };
-use egui;
 use std::collections::HashMap;
+use egui::Vec2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewMode {

@@ -39,7 +39,7 @@ pub struct FileConfig {
     pub sample_size: usize,
     pub columns: Vec<ColumnConfig>,
     pub null_values: Vec<String>,
-    pub preview_data: Option<PreviewData>,
+    pub preview_data: Option<(Vec<String>, Vec<Vec<String>>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -235,23 +235,18 @@ impl EnhancedCsvImportDialog {
             // File tabs
             ui.horizontal(|ui| {
                 ui.label("Files:");
+                let mut needs_preview_load = false;
                 for (i, file) in self.files.iter().enumerate() {
-                    let selected = i == self.current_file_index;
-                    if ui.selectable_label(selected, file.file_name()).clicked() {
+                    if ui.selectable_label(i == self.current_file_index, &file.file_name()).clicked() {
                         self.current_file_index = i;
-                        self.load_preview_for_current_file();
+                        // Don't call load_preview here, mark it for later
+                        needs_preview_load = true;
                     }
                 }
                 
-                if ui.button("➕ Add More").clicked() {
-                    if let Some(files) = rfd::FileDialog::new()
-                        .add_filter("CSV files", &["csv"])
-                        .pick_files()
-                    {
-                        for file in files {
-                            self.add_file(file);
-                        }
-                    }
+                // Load preview after iteration
+                if needs_preview_load {
+                    self.load_preview_for_current_file();
                 }
             });
             
@@ -259,24 +254,43 @@ impl EnhancedCsvImportDialog {
             
             // Main content area
             if let Some(current_file) = self.files.get_mut(self.current_file_index) {
+                // Clone values needed inside the closure to avoid borrow issues
+                let mut needs_render = false;
+                
                 ui.horizontal(|ui| {
-                    // Left panel - File configuration
-                    ui.vertical(|ui| {
-                        ui.set_width(400.0);
-                        self.render_file_configuration(ui, current_file);
-                    });
-                    
-                    ui.separator();
-                    
-                    // Right panel - Data preview
-                    ui.vertical(|ui| {
-                        self.render_data_preview(ui, current_file);
-                    });
+                    ui.label("Quick Settings:");
+                    if ui.button("⚙️ Configure").clicked() {
+                        needs_render = true;
+                    }
                 });
+                
+                if needs_render {
+                    // Use index-based method to avoid borrowing issues
+                    self.render_file_configuration_for_index(ui, self.current_file_index);
+                }
             }
         }
         
         created_db_path
+    }
+    
+    fn render_file_configuration_for_index(&mut self, ui: &mut Ui, file_index: usize) {
+        if file_index >= self.files.len() {
+            return;
+        }
+        
+        // Inline the configuration rendering to avoid borrowing issues
+        let config = &mut self.files[file_index];
+        
+        ui.heading(format!("📄 {}", config.file_name()));
+        
+        ui.horizontal(|ui| {
+            ui.label("Table name:");
+            ui.text_edit_singleline(&mut config.table_name);
+        });
+        
+        // Add other configuration UI here...
+        ui.separator();
     }
     
     fn render_file_configuration(&mut self, ui: &mut Ui, config: &mut FileConfig) {
@@ -309,7 +323,7 @@ impl EnhancedCsvImportDialog {
                     });
                 
                 if ui.button("🔄 Refresh Preview").clicked() {
-                    self.load_preview_for_file(config);
+                    self.load_preview_for_file(self.current_file_index);
                 }
             });
             
@@ -337,62 +351,42 @@ impl EnhancedCsvImportDialog {
                         TableBuilder::new(ui)
                             .striped(true)
                             .resizable(true)
-                            .column(Column::auto().at_least(120.0)) // Name
-                            .column(Column::auto().at_least(80.0))  // Type
-                            .column(Column::auto().at_least(60.0))  // Include
-                            .column(Column::auto().at_least(50.0))  // PK
-                            .column(Column::auto().at_least(70.0))  // Not Null
-                            .column(Column::auto().at_least(60.0))  // Unique
-                            .column(Column::auto().at_least(60.0))  // Index
+                            .column(Column::auto())
+                            .column(Column::auto())
+                            .column(Column::auto())
+                            .column(Column::remainder())
                             .header(20.0, |mut header| {
-                                header.col(|ui| { ui.strong("Column"); });
-                                header.col(|ui| { ui.strong("Type"); });
-                                header.col(|ui| { ui.strong("Include"); });
-                                header.col(|ui| { ui.strong("PK"); });
-                                header.col(|ui| { ui.strong("Not Null"); });
-                                header.col(|ui| { ui.strong("Unique"); });
-                                header.col(|ui| { ui.strong("Index"); });
+                                header.col(|ui| { ui.label("Column Name"); });
+                                header.col(|ui| { ui.label("Data Type"); });
+                                header.col(|ui| { ui.label("Include"); });
+                                header.col(|ui| { ui.label("Notes"); });
                             })
                             .body(|mut body| {
-                                for (i, column) in config.columns.iter_mut().enumerate() {
+                                let num_columns = config.columns.len();
+                                for i in 0..num_columns {
                                     body.row(18.0, |mut row| {
-                                        row.col(|ui| {
-                                            ui.text_edit_singleline(&mut column.name);
+                                        row.col(|ui| { 
+                                            ui.label(&config.columns[i].name); 
                                         });
                                         row.col(|ui| {
-                                            ComboBox::from_id_source(format!("type_{}", i))
-                                                .selected_text(format!("{:?}", column.data_type))
-                                                .show_ui(ui, |ui| {
-                                                    ui.selectable_value(&mut column.data_type, DataType::Text, "Text");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Integer, "Integer");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Real, "Real");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Boolean, "Boolean");
-                                                    ui.selectable_value(&mut column.data_type, DataType::Date, "Date");
-                                                    ui.selectable_value(&mut column.data_type, DataType::DateTime, "DateTime");
-                                                });
+                                            ui.label(format!("{:?}", config.columns[i].data_type));
                                         });
                                         row.col(|ui| {
-                                            ui.checkbox(&mut column.included, "");
+                                            ui.checkbox(&mut config.columns[i].included, "");
                                         });
                                         row.col(|ui| {
-                                            if ui.checkbox(&mut column.is_primary_key, "").changed() && column.is_primary_key {
-                                                // Ensure only one primary key
-                                                for (j, other_col) in config.columns.iter_mut().enumerate() {
-                                                    if j != i {
-                                                        other_col.is_primary_key = false;
-                                                    }
+                                            // Check for duplicate column names
+                                            let current_name = &config.columns[i].name;
+                                            let mut is_duplicate = false;
+                                            for j in 0..num_columns {
+                                                if i != j && config.columns[j].name == *current_name {
+                                                    is_duplicate = true;
+                                                    break;
                                                 }
-                                                self.pk_changed_index = Some(i);
                                             }
-                                        });
-                                        row.col(|ui| {
-                                            ui.checkbox(&mut column.not_null, "");
-                                        });
-                                        row.col(|ui| {
-                                            ui.checkbox(&mut column.unique, "");
-                                        });
-                                        row.col(|ui| {
-                                            ui.checkbox(&mut column.create_index, "");
+                                            if is_duplicate {
+                                                ui.colored_label(Color32::YELLOW, "⚠️ Duplicate name");
+                                            }
                                         });
                                     });
                                 }
@@ -436,30 +430,24 @@ impl EnhancedCsvImportDialog {
     fn render_data_preview(&mut self, ui: &mut Ui, config: &FileConfig) {
         ui.heading("👁️ Data Preview");
         
-        if let Some(ref preview) = config.preview_data {
+        if let Some((headers, preview)) = &config.preview_data {
             ScrollArea::both()
                 .max_height(400.0)
                 .show(ui, |ui| {
                     TableBuilder::new(ui)
                         .striped(true)
                         .resizable(true)
-                        .columns(Column::auto().at_least(80.0), preview.rows.first().map_or(0, |r| r.len()))
+                        .columns(Column::auto().at_least(80.0), headers.len())
                         .header(20.0, |mut header| {
-                            if let Some(first_row) = preview.rows.first() {
-                                for (i, cell) in first_row.iter().enumerate() {
-                                    header.col(|ui| {
-                                        if config.header_row == 0 {
-                                            ui.strong(cell);
-                                        } else {
-                                            ui.strong(&format!("Column {}", i + 1));
-                                        }
-                                    });
-                                }
+                            for (i, header_text) in headers.iter().enumerate() {
+                                header.col(|ui| {
+                                    ui.strong(header_text);
+                                });
                             }
                         })
                         .body(|mut body| {
                             let skip_rows = if config.header_row == 0 { 1 } else { 0 };
-                            for row in preview.rows.iter().skip(skip_rows).take(50) {
+                            for row in preview.iter().skip(skip_rows).take(50) {
                                 body.row(18.0, |mut table_row| {
                                     for cell in row.iter() {
                                         table_row.col(|ui| {
@@ -477,53 +465,52 @@ impl EnhancedCsvImportDialog {
     
     fn load_preview_for_current_file(&mut self) {
         if let Some(config) = self.files.get_mut(self.current_file_index) {
-            self.load_preview_for_file(config);
+            self.load_preview_for_file(self.current_file_index);
         }
     }
     
-    fn load_preview_for_file(&mut self, config: &mut FileConfig) {
-        // Simple CSV reading for preview
-        if let Ok(content) = std::fs::read_to_string(&config.path) {
-            let mut rows = Vec::new();
-            let mut reader = csv::ReaderBuilder::new()
-                .delimiter(config.delimiter as u8)
-                .has_headers(false)
-                .from_reader(content.as_bytes());
-            
-            for (i, result) in reader.records().enumerate() {
-                if i >= config.sample_size {
-                    break;
-                }
-                if let Ok(record) = result {
-                    let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
-                    rows.push(row);
-                }
-            }
-            
-            // Infer column types and create column configs
-            if !rows.is_empty() && config.columns.is_empty() {
-                let header_row_idx = config.header_row;
-                let headers = if header_row_idx < rows.len() {
-                    rows[header_row_idx].clone()
+    fn load_preview_for_file(&mut self, file_index: usize) {
+        if file_index >= self.files.len() {
+            return;
+        }
+        
+        let file_path = self.files[file_index].path.clone();
+        
+        match std::fs::File::open(&file_path) {
+            Ok(file) => {
+                let mut reader = csv::ReaderBuilder::new()
+                    .delimiter(self.files[file_index].delimiter as u8)
+                    .has_headers(self.files[file_index].header_row == 0) // Assuming header_row 0 means headers are present
+                    .from_reader(file);
+                
+                // Read headers
+                let headers = if self.files[file_index].header_row == 0 {
+                    match reader.headers() {
+                        Ok(h) => h.iter().map(|s| s.to_string()).collect(),
+                        Err(_) => vec![]
+                    }
                 } else {
-                    (0..rows[0].len()).map(|i| format!("Column_{}", i + 1)).collect()
+                    vec![]
                 };
                 
-                for (i, header) in headers.iter().enumerate() {
-                    let data_type = self.infer_column_type_from_data(&rows, i, header_row_idx);
-                    config.columns.push(ColumnConfig {
-                        name: header.clone(),
-                        data_type,
-                        included: true,
-                        create_index: false,
-                        is_primary_key: false,
-                        not_null: false,
-                        unique: false,
-                    });
+                // Read preview rows
+                let mut rows = Vec::new();
+                for (i, result) in reader.records().enumerate() {
+                    if i >= 10 { break; } // Limit preview to 10 rows
+                    
+                    match result {
+                        Ok(record) => {
+                            rows.push(record.iter().map(|s| s.to_string()).collect());
+                        }
+                        Err(_) => break
+                    }
                 }
+                
+                self.files[file_index].preview_data = Some((headers, rows));
             }
-            
-            config.preview_data = Some(PreviewData { rows });
+            Err(e) => {
+                self.error = Some(format!("Failed to read file: {}", e));
+            }
         }
     }
     

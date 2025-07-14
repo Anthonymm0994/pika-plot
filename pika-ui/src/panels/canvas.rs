@@ -1,12 +1,15 @@
 //! Canvas panel for node-based data visualization.
 
-use crate::state::{AppState, NodeConnection, ConnectionType, CanvasNode, CanvasNodeType, ShapeType, ToolMode, NodeDataPreview};
-use pika_core::types::NodeId;
-use tokio::sync::broadcast::Sender;
-use egui::{Context, Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, menu, Shape};
-use crate::panels::canvas_panel::AppEvent;
-use egui_extras::{TableBuilder, Column};
+use crate::{
+    panels::canvas_panel::AppEvent,
+    state::{AppState, CanvasNode, CanvasNodeType, ShapeType, ToolMode, ConnectionType},
+};
+
+use egui::{Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, Shape, Area};
+
 use std::collections::{HashMap, HashSet};
+use pika_core::NodeId;
+use tokio::sync::broadcast::Sender;
 
 const RESIZE_HANDLE_SIZE: f32 = 8.0;
 const MIN_NODE_SIZE: f32 = 50.0;
@@ -583,109 +586,108 @@ impl CanvasPanel {
     }
     
     fn show_node_context_menu(&mut self, ui: &mut Ui, state: &mut AppState, node_id: NodeId) {
-        if let Some(node) = state.get_canvas_node(node_id) {
-            match &node.node_type {
-                CanvasNodeType::Table { .. } => {
-                    ui.label("Query (Ctrl+Enter to execute):");
-                    if let Some(query) = state.node_queries.get_mut(&node_id) {
-                        ui.add(egui::TextEdit::multiline(query)
-                            .code_editor()
-                            .desired_width(250.0)
-                            .desired_rows(3));
+        // Get node type first to avoid borrow issues
+        let node_type = state.get_canvas_node(node_id).map(|n| n.node_type.clone());
+        
+        if let Some(node_type) = node_type {
+            match node_type {
+                CanvasNodeType::Table { table_info: _ } => {
+                    // Query editor
+                    ui.label("Query Editor:");
+                    let mut query = state.node_queries.get(&node_id).cloned().unwrap_or_default();
+                    
+                    let response = ui.text_edit_multiline(&mut query);
+                    if response.changed() {
+                        state.node_queries.insert(node_id, query.clone());
                     }
                     
-                    if ui.button("▶ Execute Query").clicked() {
+                    // Execute on Ctrl+Enter
+                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl) {
                         state.execute_node_query(node_id);
-                        self.context_menu_pos = None;
-                        ui.close_menu();
                     }
                     
                     ui.separator();
-                    ui.label("Create Plot:");
-                    ui.separator();
                     
-                    // Basic plots
-                    if ui.button("📊 Histogram").clicked() {
+                    // Quick plot creation
+                    if ui.button("Create Histogram").clicked() {
                         self.create_plot_from_table(state, node_id, "Histogram");
-                        self.context_menu_pos = None;
                         ui.close_menu();
                     }
-                    if ui.button("📈 Line Plot").clicked() {
+                    if ui.button("Create Line Plot").clicked() {
                         self.create_plot_from_table(state, node_id, "Line");
-                        self.context_menu_pos = None;
                         ui.close_menu();
                     }
-                    if ui.button("📉 Scatter Plot").clicked() {
+                    if ui.button("Create Scatter Plot").clicked() {
                         self.create_plot_from_table(state, node_id, "Scatter");
-                        self.context_menu_pos = None;
                         ui.close_menu();
                     }
-                    if ui.button("📊 Bar Chart").clicked() {
+                    if ui.button("Create Bar Chart").clicked() {
                         self.create_plot_from_table(state, node_id, "Bar");
-                        self.context_menu_pos = None;
                         ui.close_menu();
                     }
                     
                     ui.separator();
                     
-                    // Statistical plots
-                    if ui.button("📦 Box Plot").clicked() {
-                        self.create_plot_from_table(state, node_id, "BoxPlot");
-                        self.context_menu_pos = None;
-                        ui.close_menu();
-                    }
-                    if ui.button("🎻 Violin Plot").clicked() {
-                        self.create_plot_from_table(state, node_id, "Violin");
-                        self.context_menu_pos = None;
-                        ui.close_menu();
-                    }
-                    if ui.button("🔥 Heatmap").clicked() {
-                        self.create_plot_from_table(state, node_id, "Heatmap");
-                        self.context_menu_pos = None;
-                        ui.close_menu();
-                    }
-                    if ui.button("🔗 Correlation").clicked() {
-                        self.create_plot_from_table(state, node_id, "Correlation");
-                        self.context_menu_pos = None;
-                        ui.close_menu();
-                    }
+                    // More plot types
+                    ui.menu_button("More Plots", |ui| {
+                        if ui.button("Box Plot").clicked() {
+                            self.create_plot_from_table(state, node_id, "BoxPlot");
+                            ui.close_menu();
+                        }
+                        if ui.button("Violin Plot").clicked() {
+                            self.create_plot_from_table(state, node_id, "Violin");
+                            ui.close_menu();
+                        }
+                        if ui.button("Heatmap").clicked() {
+                            self.create_plot_from_table(state, node_id, "Heatmap");
+                            ui.close_menu();
+                        }
+                        if ui.button("Correlation Matrix").clicked() {
+                            self.create_plot_from_table(state, node_id, "Correlation");
+                            ui.close_menu();
+                        }
+                    });
                     
                     ui.separator();
                     
-                    // Advanced plots
-                    if ui.button("⏱ Time Series").clicked() {
+                    // Time series specific
+                    if ui.button("Create Time Series").clicked() {
                         self.create_plot_from_table(state, node_id, "TimeSeries");
-                        self.context_menu_pos = None;
                         ui.close_menu();
                     }
-                    if ui.button("🕸 Radar Chart").clicked() {
+                    if ui.button("Create Radar Chart").clicked() {
                         self.create_plot_from_table(state, node_id, "Radar");
-                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    
+                    ui.separator();
+                    
+                    if ui.button("Delete").clicked() {
+                        state.canvas_nodes.remove(&node_id);
+                        state.selected_node = None;
                         ui.close_menu();
                     }
                     
                     ui.separator();
                     
                     // Connection options for table nodes
-                    if let CanvasNodeType::Table { .. } = &node.node_type {
-                        if ui.button("Create Connection From Here").clicked() {
-                            self.connecting_from = Some(node_id);
-                            ui.close_menu();
-                        }
-                        
-                        ui.separator();
-                        
-                        // Create plot submenu
-                        ui.menu_button("Create Plot", |ui| {
-                            for plot_type in &["Line", "Bar", "Scatter", "Histogram", "Box", "Violin", 
-                                              "Heatmap", "Correlation", "Time Series", "Radar"] {
-                                if ui.button(*plot_type).clicked() {
-                                    self.create_plot_from_table(state, node_id, plot_type);
-                                    ui.close_menu();
-                                }
-                            }
-                        });
+                    if ui.button("Create Connection From Here").clicked() {
+                        self.connecting_from = Some(node_id);
+                        ui.close_menu();
                     }
+                    
+                    ui.separator();
+                    
+                    // Create plot submenu
+                    ui.menu_button("Create Plot", |ui| {
+                        for plot_type in &["Line", "Bar", "Scatter", "Histogram", "Box", "Violin", 
+                                          "Heatmap", "Correlation", "Time Series", "Radar"] {
+                            if ui.button(*plot_type).clicked() {
+                                self.create_plot_from_table(state, node_id, plot_type);
+                                ui.close_menu();
+                            }
+                        }
+                    });
                 }
                 _ => {
                     if ui.button("Delete").clicked() {
@@ -1157,18 +1159,19 @@ impl CanvasPanel {
     
     fn get_resize_handle_at_pos(&self, node: &CanvasNode, pos: Pos2, to_screen: impl Fn(Pos2) -> Pos2) -> Option<ResizeHandle> {
         let handles = [
-            (ResizeHandle::TopLeft, Pos2::new(node.position.x, node.position.y)),
+            (ResizeHandle::TopLeft, node.position.to_pos2()),
             (ResizeHandle::TopRight, Pos2::new(node.position.x + node.size.x, node.position.y)),
             (ResizeHandle::BottomLeft, Pos2::new(node.position.x, node.position.y + node.size.y)),
-            (ResizeHandle::BottomRight, Pos2::new(node.position.x + node.size.x, node.position.y + node.size.y)),
+            (ResizeHandle::BottomRight, (node.position + node.size).to_pos2()),
         ];
         
-        for (handle, handle_pos) in handles {
-            let dist = (pos.to_vec2() - handle_pos.to_vec2()).length();
-            if dist <= RESIZE_HANDLE_SIZE {
-                return Some(handle);
+        for (handle_type, handle_pos) in handles {
+            let screen_pos = to_screen(handle_pos);
+            if (screen_pos - pos).length() <= RESIZE_HANDLE_SIZE {
+                return Some(handle_type);
             }
         }
+        
         None
     }
     

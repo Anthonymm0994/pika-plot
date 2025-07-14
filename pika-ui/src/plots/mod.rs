@@ -15,7 +15,7 @@ pub mod time_series_plot;
 pub mod violin_plot;
 
 // Re-export commonly used items
-pub use plot_renderer::{PlotRenderer, PlotRenderContext};
+pub use plot_renderer::PlotRenderer;
 
 // For now, export a simple placeholder plot trait
 pub trait PlotView {

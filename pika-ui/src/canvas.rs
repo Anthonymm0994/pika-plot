@@ -302,7 +302,7 @@ impl Canvas {
     fn handle_drag_end(&mut self) {
         if self.is_creating && self.creation_start.is_some() {
             let start = self.creation_start.unwrap();
-            let end = self.elements.last().map_or(start, |_| start); // This will be set properly in draw_creation_preview
+            let _end = self.elements.last().map_or(start, |_| start); // This will be set properly in draw_creation_preview
             
             // We need to get the current pointer position, but since we don't have it here,
             // we'll create the element in draw_creation_preview when dragging

@@ -1069,7 +1069,7 @@ impl Default for FileImportDialog {
 
 // Legacy compatibility - convert to new system
 impl FileImportDialog {
-    pub fn show_legacy(&mut self, ui: &mut Ui) -> Option<(PathBuf, ImportOptions)> {
+    pub fn show_legacy(&mut self, _ui: &mut Ui) -> Option<(PathBuf, ImportOptions)> {
         // This is a compatibility shim for the old interface
         // In practice, you'd migrate to use the new show() method with Context
         None

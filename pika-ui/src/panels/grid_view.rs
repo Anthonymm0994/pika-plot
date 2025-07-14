@@ -1,8 +1,6 @@
 //! Grid view for displaying tabular data.
 
-// Temporarily disabled - arrow dependencies removed due to conflicts
-// use arrow::record_batch::RecordBatch;
-use egui::{Ui, ScrollArea, Vec2};
+use egui::{Ui, ScrollArea};
 use std::sync::Arc;
 
 /// Grid view panel for displaying tabular data.

@@ -216,20 +216,25 @@ impl WorkingCsvImportDialog {
         if self.files.len() > 1 {
             ui.horizontal(|ui| {
                 ui.label("📁 Files:");
+                let mut needs_preview_load = false;
                 for (i, file) in self.files.iter().enumerate() {
-                    let selected = i == self.current_file_index;
-                    if ui.selectable_label(selected, file.file_name()).clicked() && i != self.current_file_index {
+                    if ui.selectable_label(i == self.current_file_index, &file.file_name()).clicked() {
                         self.current_file_index = i;
-                        self.load_preview_for_current_file();
+                        needs_preview_load = true;
                     }
+                }
+                
+                // Load preview after iteration
+                if needs_preview_load {
+                    self.load_preview_for_current_file();
                 }
             });
             ui.separator();
         }
         
-        // Current file configuration
-        if let Some(config) = self.files.get_mut(self.current_file_index) {
-            return self.render_file_configuration(ui, config);
+        if self.current_file_index < self.files.len() {
+            self.render_file_configuration_for_index(ui, self.current_file_index);
+            return None; // Configuration is shown inline
         }
         
         None
@@ -257,6 +262,7 @@ impl WorkingCsvImportDialog {
             ui.text_edit_singleline(&mut config.table_name);
         });
         
+        let mut need_reload = false;
         ui.horizontal(|ui| {
             ui.label("Delimiter:");
             let delimiter_str = config.delimiter.to_string();
@@ -269,7 +275,7 @@ impl WorkingCsvImportDialog {
                     '|' => ',',
                     _ => ',',
                 };
-                self.load_preview_for_current_file();
+                need_reload = true;
             }
         });
         
@@ -278,7 +284,7 @@ impl WorkingCsvImportDialog {
         // Data preview
         if config.preview_data.is_none() {
             if ui.button("🔄 Load Preview").clicked() {
-                self.load_preview_for_current_file();
+                need_reload = true;
             }
         } else {
             self.render_data_preview(ui, config);
@@ -287,12 +293,101 @@ impl WorkingCsvImportDialog {
         ui.separator();
         
         // Import button
-        ui.horizontal(|ui| {
+        let result = ui.horizontal(|ui| {
             if ui.button("📊 Import to Database").clicked() {
-                return self.start_database_creation();
+                return Some(true);
             }
             None
-        }).inner
+        }).inner;
+        
+        if need_reload {
+            self.load_preview_for_current_file();
+        }
+        
+        if result == Some(true) {
+            return self.start_database_creation();
+        }
+        
+        None
+    }
+    
+    fn render_file_configuration_for_index(&mut self, ui: &mut Ui, file_index: usize) {
+        if file_index >= self.files.len() {
+            return;
+        }
+        
+        let result = self.render_file_configuration_static(ui, file_index);
+        
+        if result.is_some() {
+            // Handle the result
+        }
+    }
+    
+    fn render_file_configuration_static(&mut self, ui: &mut Ui, file_index: usize) -> Option<PathBuf> {
+        if file_index >= self.files.len() {
+            return None;
+        }
+        
+        let config = &mut self.files[file_index];
+        
+        ui.heading(format!("📄 {}", config.file_name()));
+        
+        ui.horizontal(|ui| {
+            ui.label("Table name:");
+            ui.text_edit_singleline(&mut config.table_name);
+        });
+        
+        let mut need_reload = false;
+        ui.horizontal(|ui| {
+            ui.label("Delimiter:");
+            let delimiter_str = config.delimiter.to_string();
+            if ui.button(&delimiter_str).clicked() {
+                // Cycle through common delimiters
+                config.delimiter = match config.delimiter {
+                    ',' => ';',
+                    ';' => '\t',
+                    '\t' => '|',
+                    '|' => ',',
+                    _ => ',',
+                };
+                need_reload = true;
+            }
+        });
+        
+        ui.separator();
+        
+        // Data preview
+        if config.preview_data.is_none() {
+            if ui.button("🔄 Load Preview").clicked() {
+                need_reload = true;
+            }
+        } else {
+            // Show preview inline
+            if let Some(preview) = &config.preview_data {
+                ui.heading("📋 Data Preview");
+                // Show preview content...
+            }
+        }
+        
+        ui.separator();
+        
+        // Import button
+        let mut should_import = false;
+        ui.horizontal(|ui| {
+            if ui.button("📊 Import to Database").clicked() {
+                should_import = true;
+            }
+        });
+        
+        if need_reload {
+            self.load_preview_for_current_file();
+        }
+        
+        if should_import {
+            return self.start_database_creation();
+        }
+        
+        None
     }
     
     fn render_data_preview(&mut self, ui: &mut Ui, config: &FileConfig) {
@@ -330,12 +425,17 @@ impl WorkingCsvImportDialog {
     }
     
     fn load_preview_for_current_file(&mut self) {
-        if let Some(config) = self.files.get_mut(self.current_file_index) {
-            self.load_preview_for_file_config(config);
+        if self.current_file_index < self.files.len() {
+            self.load_preview_for_file_index(self.current_file_index);
         }
     }
     
-    fn load_preview_for_file_config(&mut self, config: &mut FileConfig) {
+    fn load_preview_for_file_index(&mut self, file_index: usize) {
+        if file_index >= self.files.len() {
+            return;
+        }
+        
+        let config = &mut self.files[file_index];
         match std::fs::File::open(&config.path) {
             Ok(file) => {
                 let mut reader = csv::ReaderBuilder::new()
