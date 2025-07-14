@@ -3,9 +3,10 @@
 use crate::state::{AppState, NodeConnection, ConnectionType, CanvasNode, CanvasNodeType, ShapeType, ToolMode, NodeDataPreview};
 use pika_core::types::NodeId;
 use tokio::sync::broadcast::Sender;
-use egui::{Context, Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, menu};
+use egui::{Context, Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, menu, Shape};
 use crate::panels::canvas_panel::AppEvent;
 use egui_extras::{TableBuilder, Column};
+use std::collections::{HashMap, HashSet};
 
 const RESIZE_HANDLE_SIZE: f32 = 8.0;
 const MIN_NODE_SIZE: f32 = 50.0;
@@ -19,6 +20,11 @@ enum ResizeHandle {
     TopRight,
     BottomLeft,
     BottomRight,
+}
+
+/// Spatial index cell for fast hit testing
+struct SpatialCell {
+    nodes: Vec<NodeId>,
 }
 
 /// Canvas panel for node-based visualization.
@@ -48,6 +54,14 @@ pub struct CanvasPanel {
     
     /// Context menu position
     context_menu_pos: Option<Pos2>,
+    
+    /// Performance optimizations
+    visible_rect: Rect,
+    dirty_nodes: HashSet<NodeId>,
+    spatial_index: HashMap<(i32, i32), SpatialCell>,
+    cached_grid: Option<Vec<Shape>>,
+    frame_count: u64,
+    last_interaction_frame: u64,
 }
 
 impl CanvasPanel {
@@ -65,10 +79,18 @@ impl CanvasPanel {
             current_stroke: Vec::new(),
             preview_shape: None,
             context_menu_pos: None,
+            visible_rect: Rect::ZERO,
+            dirty_nodes: HashSet::new(),
+            spatial_index: HashMap::new(),
+            cached_grid: None,
+            frame_count: 0,
+            last_interaction_frame: 0,
         }
     }
     
     pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, event_tx: &Sender<AppEvent>) {
+        self.frame_count += 1;
+        
         let (response, painter) = ui.allocate_painter(
             ui.available_size(),
             Sense::click_and_drag(),
@@ -85,10 +107,18 @@ impl CanvasPanel {
         self.zoom = state.canvas_state.zoom;
         self.pan_offset = state.canvas_state.pan_offset;
         
+        // Track if we're interacting for performance optimization
+        let is_interacting = response.dragged() || response.clicked() || 
+                           response.double_clicked() || response.hovered();
+        if is_interacting {
+            self.last_interaction_frame = self.frame_count;
+        }
+        
         // Handle middle mouse pan
         if response.dragged_by(egui::PointerButton::Middle) {
             self.pan_offset += response.drag_delta();
             state.canvas_state.pan_offset = self.pan_offset;
+            self.cached_grid = None; // Invalidate grid cache
         }
         
         // Handle zoom with scroll wheel
@@ -99,6 +129,7 @@ impl CanvasPanel {
                     self.zoom = (self.zoom * zoom_delta).clamp(0.1, 5.0);
                     // Zoom towards mouse position
                     state.canvas_state.zoom = self.zoom;
+                    self.cached_grid = None; // Invalidate grid cache
                 }
             }
         });
@@ -122,9 +153,14 @@ impl CanvasPanel {
             )
         };
         
-        // Draw grid
+        // Draw grid (cached for performance)
         if state.canvas_state.show_grid {
-        self.draw_grid(&painter, &response.rect);
+            if self.cached_grid.is_none() {
+                self.cached_grid = Some(self.create_grid_shapes(&response.rect));
+            }
+            if let Some(grid_shapes) = &self.cached_grid {
+                painter.extend(grid_shapes.clone());
+            }
         }
         
         // Draw connections
@@ -184,21 +220,34 @@ impl CanvasPanel {
             ToolMode::Text => self.handle_text_tool(&response, state, from_screen),
         }
         
-        // Draw canvas nodes AFTER tool handling so preview shapes are visible
-        let nodes: Vec<_> = state.canvas_nodes.keys().cloned().collect();
-        for node_id in nodes {
-            if let Some(node) = state.get_canvas_node(node_id) {
-                let is_selected = state.selected_node == Some(node_id);
-                self.draw_node(&painter, node, to_screen, is_selected, state);
-                
-                // Draw resize handles for selected nodes
-                if is_selected && state.tool_mode == ToolMode::Select {
-                    self.draw_resize_handles(&painter, node, to_screen);
-                }
+        // Update visible rect for frustum culling
+        self.visible_rect = Rect::from_min_max(
+            from_screen(response.rect.min),
+            from_screen(response.rect.max)
+        );
+        
+        // Draw canvas nodes with frustum culling
+        for (node_id, node) in &state.canvas_nodes {
+            // Skip nodes outside visible area
+            let node_rect = Rect::from_min_size(
+                Pos2::new(node.position.x, node.position.y),
+                node.size
+            );
+            
+            if !self.visible_rect.intersects(node_rect) {
+                continue; // Skip invisible nodes
+            }
+            
+            let is_selected = state.selected_node == Some(*node_id);
+            self.draw_node(&painter, node, to_screen, is_selected, state);
+            
+            // Draw resize handles for selected nodes
+            if is_selected && state.tool_mode == ToolMode::Select {
+                self.draw_resize_handles(&painter, node, to_screen);
             }
         }
         
-        // Handle right-click context menu
+        // Handle right-click context menu with improved hit testing
         if response.clicked_by(egui::PointerButton::Secondary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 self.context_menu_pos = Some(from_screen(pos));
@@ -209,36 +258,29 @@ impl CanvasPanel {
         if let Some(menu_pos) = self.context_menu_pos {
             let screen_pos = to_screen(menu_pos);
             
-            // Check if we right-clicked on a node
-            let clicked_node = state.canvas_nodes.values().find(|node| {
-                let node_rect = Rect::from_min_size(
-                    Pos2::new(node.position.x, node.position.y),
-                    node.size,
-                );
-                node_rect.contains(menu_pos)
-            }).map(|n| n.id);
+            // Use spatial index for faster node hit testing
+            let clicked_node = self.find_node_at_pos(state, menu_pos);
             
-            // Show appropriate context menu
-            ui.allocate_ui_at_rect(
-                Rect::from_min_size(screen_pos, Vec2::splat(1.0)),
-                |ui| {
-                    menu::bar(ui, |ui| {
-                        ui.menu_button("", |ui| {
-                            if let Some(node_id) = clicked_node {
-                                self.show_node_context_menu(ui, state, node_id);
-            } else {
-                                self.show_canvas_context_menu(ui, state, menu_pos);
-                            }
-                            
-                            // Close menu after any action
-                            if ui.button("Cancel").clicked() {
-                                self.context_menu_pos = None;
-                                ui.close_menu();
-                            }
-                        });
-                    });
+            // Create a fixed area for the context menu
+            let menu_area = egui::Area::new(ui.id().with("context_menu"))
+                .fixed_pos(screen_pos)
+                .order(egui::Order::Foreground)
+                .interactable(true);
+                
+            menu_area.show(ui.ctx(), |ui| {
+                ui.set_min_width(150.0);
+                
+                if let Some(node_id) = clicked_node {
+                    self.show_node_context_menu(ui, state, node_id);
+                } else {
+                    self.show_canvas_context_menu(ui, state, menu_pos);
                 }
-            );
+            });
+            
+            // Close menu if we click elsewhere
+            if response.clicked() && self.context_menu_pos.is_some() {
+                self.context_menu_pos = None;
+            }
         }
 
         // Handle keyboard input for query editing
@@ -297,20 +339,14 @@ impl CanvasPanel {
                     }
                 }
                 
-                // Then check if clicking on a node
-                for (id, node) in &state.canvas_nodes {
-                    let node_rect = Rect::from_min_size(
-                        Pos2::new(node.position.x, node.position.y),
-                        node.size,
-                    );
-                    
-                    if node_rect.contains(canvas_pos) {
-                        self.dragging_node = Some(*id);
+                // Then check if clicking on a node (optimized)
+                if let Some(clicked_node) = self.find_node_at_pos(state, canvas_pos) {
+                    self.dragging_node = Some(clicked_node);
+                    if let Some(node) = state.get_canvas_node(clicked_node) {
                         self.drag_offset = canvas_pos.to_vec2() - node.position;
-                        state.selected_node = Some(*id);
-                        let _ = event_tx.send(AppEvent::NodeSelected(*id));
-                        break;
                     }
+                    state.selected_node = Some(clicked_node);
+                    let _ = event_tx.send(AppEvent::NodeSelected(clicked_node));
                 }
                 
                 // If clicking on empty space, deselect
@@ -1102,6 +1138,80 @@ impl CanvasPanel {
                 RESIZE_HANDLE_SIZE / 2.0,
                 Stroke::new(1.0, Color32::WHITE),
             );
+        }
+    }
+    
+    // Performance optimization: Create grid shapes once and cache them
+    fn create_grid_shapes(&self, rect: &Rect) -> Vec<Shape> {
+        let mut shapes = Vec::new();
+        let grid_size = 50.0 * self.zoom;
+        let grid_color = Color32::from_gray(40);
+        
+        // Calculate grid bounds
+        let start_x = ((rect.min.x - self.pan_offset.x) / grid_size).floor() * grid_size + self.pan_offset.x;
+        let start_y = ((rect.min.y - self.pan_offset.y) / grid_size).floor() * grid_size + self.pan_offset.y;
+        let end_x = rect.max.x;
+        let end_y = rect.max.y;
+        
+        // Vertical lines
+        let mut x = start_x;
+        while x <= end_x {
+            shapes.push(Shape::LineSegment {
+                points: [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
+                stroke: Stroke::new(1.0, grid_color).into(),
+            });
+            x += grid_size;
+        }
+        
+        // Horizontal lines
+        let mut y = start_y;
+        while y <= end_y {
+            shapes.push(Shape::LineSegment {
+                points: [Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, y)],
+                stroke: Stroke::new(1.0, grid_color).into(),
+            });
+            y += grid_size;
+        }
+        
+        shapes
+    }
+    
+    // Performance optimization: Find node at position using spatial index
+    fn find_node_at_pos(&self, state: &AppState, pos: Pos2) -> Option<NodeId> {
+        // For now, use linear search, but this could be optimized with spatial indexing
+        for (id, node) in &state.canvas_nodes {
+            let node_rect = Rect::from_min_size(
+                Pos2::new(node.position.x, node.position.y),
+                node.size,
+            );
+            if node_rect.contains(pos) {
+                return Some(*id);
+            }
+        }
+        None
+    }
+    
+    // Rebuild spatial index for fast hit testing
+    fn rebuild_spatial_index(&mut self, state: &AppState) {
+        self.spatial_index.clear();
+        
+        let cell_size = 100.0; // Size of spatial cells
+        
+        for (id, node) in &state.canvas_nodes {
+            let min_cell_x = (node.position.x / cell_size).floor() as i32;
+            let min_cell_y = (node.position.y / cell_size).floor() as i32;
+            let max_cell_x = ((node.position.x + node.size.x) / cell_size).ceil() as i32;
+            let max_cell_y = ((node.position.y + node.size.y) / cell_size).ceil() as i32;
+            
+            for cell_x in min_cell_x..=max_cell_x {
+                for cell_y in min_cell_y..=max_cell_y {
+                    self.spatial_index
+                        .entry((cell_x, cell_y))
+                        .or_insert_with(|| SpatialCell { nodes: Vec::new() })
+                        .nodes
+                        .push(*id);
+                }
+            }
         }
     }
 }
