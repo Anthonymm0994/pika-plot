@@ -7,6 +7,52 @@ use egui_extras::{Column, TableBuilder};
 use pika_core::types::{ColumnInfo, TableInfo};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use egui_plot::PlotPoint;
+
+// Standalone helper function for column type inference
+fn infer_column_type(rows: &[&Vec<String>], col_idx: usize) -> ColumnType {
+    let mut all_integer = true;
+    let mut all_float = true;
+    let mut all_boolean = true;
+    
+    for row in rows {
+        if let Some(value) = row.get(col_idx) {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            
+            // Check if it's a boolean
+            if !matches!(trimmed.to_lowercase().as_str(), "true" | "false" | "yes" | "no" | "0" | "1") {
+                all_boolean = false;
+            }
+            
+            // Check if it's an integer
+            if trimmed.parse::<i64>().is_err() {
+                all_integer = false;
+            }
+            
+            // Check if it's a float
+            if trimmed.parse::<f64>().is_err() {
+                all_float = false;
+            }
+            
+            if !all_integer && !all_float && !all_boolean {
+                return ColumnType::Text;
+            }
+        }
+    }
+    
+    if all_boolean {
+        ColumnType::Boolean
+    } else if all_integer {
+        ColumnType::Integer
+    } else if all_float {
+        ColumnType::Real
+    } else {
+        ColumnType::Text
+    }
+}
 
 #[derive(Debug)]
 pub struct FileConfigScreen {
@@ -94,6 +140,7 @@ enum ColumnType {
     Blob,
     Date,
     DateTime,
+    Boolean,
 }
 
 impl ColumnType {
@@ -105,6 +152,7 @@ impl ColumnType {
             ColumnType::Blob => "Blob",
             ColumnType::Date => "Date",
             ColumnType::DateTime => "DateTime",
+            ColumnType::Boolean => "Boolean",
         }
     }
     
@@ -116,6 +164,7 @@ impl ColumnType {
             ColumnType::Blob => "BLOB",
             ColumnType::Date => "DATE",
             ColumnType::DateTime => "DATETIME",
+            ColumnType::Boolean => "BOOLEAN",
         }
     }
 }
@@ -124,6 +173,7 @@ impl ColumnType {
 struct PreviewData {
     headers: Vec<String>,
     rows: Vec<Vec<String>>,
+    total_rows: usize,
 }
 
 impl FileConfigScreen {
@@ -195,100 +245,98 @@ impl FileConfigScreen {
         egui::CentralPanel::default()
             .frame(frame)
             .show(ctx, |ui| {
-                ui.push_id(self.instance_id.with("file_config_screen"), |ui| {
-                    // Title bar
-                    ui.horizontal(|ui| {
-                        ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("✕").size(20.0)).clicked() {
-                                state.view_mode = crate::state::ViewMode::Canvas;
-                            }
-                        });
-                    });
-
-                    ui.add_space(10.0);
-
-                    // Database path
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
-                        ui.add_space(10.0);
-                        
-                        let available_width = ui.available_width() - 100.0; // Leave space for Browse button
-                        let path_display = self.database_path.to_string_lossy().to_string();
-                        ui.add(egui::TextEdit::singleline(&mut path_display.clone())
-                            .desired_width(available_width.min(400.0))
-                            .interactive(false)
-                            .text_color(Color32::from_gray(180)));
-                        
-                        if ui.button("Browse...").clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
-                                .save_file()
-                            {
-                                self.database_path = path;
-                            }
-                        }
-                    });
-
-                    ui.add_space(10.0);
-
-                    // Use available space for the main content
-                    let available_size = ui.available_size();
-                    let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
-                    let right_width = available_size.x - left_width - 10.0;
-
-                    ui.horizontal_top(|ui| {
-                        // Left column - Configuration
-                        ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
-                            ui.vertical(|ui| {
-                                self.render_configuration_panel(ui);
-                            });
-                        });
-
-                        ui.add_space(10.0);
-
-                        // Right column - Preview
-                        ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
-                            ui.group(|ui| {
-                                ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
-                                ui.separator();
-                                self.render_data_preview(ui);
-                            });
-                        });
-                    });
-
-                    ui.add_space(10.0);
-
-                    // Bottom buttons
-                    ui.horizontal(|ui| {
-                        if ui.button(RichText::new("Cancel").size(14.0)).clicked() {
+                // Title bar
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new("✕").size(20.0)).clicked() {
                             state.view_mode = crate::state::ViewMode::Canvas;
                         }
+                    });
+                });
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let enabled = !self.files.is_empty() && self.files.iter().any(|f| 
-                                f.columns.iter().any(|c| c.include)
-                            );
-                            
-                            let button = egui::Button::new(
-                                RichText::new(format!("✓ Create Database with {} Tables", self.files.len()))
-                                    .size(14.0)
-                                    .color(Color32::WHITE)
-                            )
-                            .fill(if enabled { Color32::from_rgb(34, 139, 34) } else { Color32::from_gray(60) });
+                ui.add_space(10.0);
 
-                            if ui.add_enabled(enabled, button).clicked() {
-                                result = Some(self.create_database());
-                                state.view_mode = crate::state::ViewMode::Canvas;
-                            }
+                // Database path
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
+                    ui.add_space(10.0);
+                    
+                    let available_width = ui.available_width() - 100.0; // Leave space for Browse button
+                    let path_display = self.database_path.to_string_lossy().to_string();
+                    ui.add(egui::TextEdit::singleline(&mut path_display.clone())
+                        .desired_width(available_width.min(400.0))
+                        .interactive(false)
+                        .text_color(Color32::from_gray(180)));
+                    
+                    if ui.button("Browse...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
+                            .save_file()
+                        {
+                            self.database_path = path;
+                        }
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Use available space for the main content
+                let available_size = ui.available_size();
+                let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
+                let right_width = available_size.x - left_width - 10.0;
+
+                ui.horizontal_top(|ui| {
+                    // Left column - Configuration
+                    ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
+                        ui.vertical(|ui| {
+                            self.render_configuration_panel(ui);
                         });
                     });
 
-                    // Error display
-                    if let Some(error) = &self.error_message {
-                        ui.colored_label(Color32::from_rgb(255, 100, 100), error);
-                    }
+                    ui.add_space(10.0);
+
+                    // Right column - Preview
+                    ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
+                        ui.group(|ui| {
+                            ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
+                            ui.separator();
+                            self.render_data_preview(ui);
+                        });
+                    });
                 });
+
+                ui.add_space(10.0);
+
+                // Bottom buttons
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("Cancel").size(14.0)).clicked() {
+                        state.view_mode = crate::state::ViewMode::Canvas;
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let enabled = !self.files.is_empty() && self.files.iter().any(|f| 
+                            f.columns.iter().any(|c| c.include)
+                        );
+                        
+                        let button = egui::Button::new(
+                            RichText::new(format!("✓ Create Database with {} Tables", self.files.len()))
+                                .size(14.0)
+                                .color(Color32::WHITE)
+                        )
+                        .fill(if enabled { Color32::from_rgb(34, 139, 34) } else { Color32::from_gray(60) });
+
+                        if ui.add_enabled(enabled, button).clicked() {
+                            result = Some(self.create_database());
+                            state.view_mode = crate::state::ViewMode::Canvas;
+                        }
+                    });
+                });
+
+                // Error display
+                if let Some(error) = &self.error_message {
+                    ui.colored_label(Color32::from_rgb(255, 100, 100), error);
+                }
             });
 
         result
@@ -304,25 +352,113 @@ impl FileConfigScreen {
             ui.label(RichText::new("CSV File:").color(Color32::from_gray(200)));
             ui.add_space(10.0);
             
-            let current_file = &self.files[self.current_file_index];
-            let file_name = current_file.path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
+            if self.current_file_index >= self.files.len() && !self.files.is_empty() {
+                self.current_file_index = 0;
+            }
             
-            egui::ComboBox::from_id_source("csv_file_selector")
-                .selected_text(file_name)
-                .show_ui(ui, |ui| {
-                    for (idx, file) in self.files.iter().enumerate() {
-                        let name = file.path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown");
-                        if ui.selectable_value(&mut self.current_file_index, idx, name).clicked() {
-                            // File selection changed
+            if let Some(current_file) = self.files.get(self.current_file_index) {
+                let file_name = current_file.path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                
+                egui::ComboBox::from_id_source("csv_file_selector")
+                    .selected_text(file_name)
+                    .show_ui(ui, |ui| {
+                        let mut selected_idx = None;
+                        for (idx, file) in self.files.iter().enumerate() {
+                            let name = file.path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown");
+                            
+                            if ui.selectable_value(&mut self.current_file_index, idx, name).clicked() {
+                                selected_idx = Some(idx);
+                            }
+                        }
+                        
+                        // Handle selection change after iteration
+                        if let Some(idx) = selected_idx {
+                            if idx < self.files.len() {
+                                self.current_file_index = idx;
+                            }
+                        }
+                    });
+                    
+                    // Handle preview loading after file selection
+                    if self.current_file_index < self.files.len() {
+                        let needs_preview = self.files.get(self.current_file_index)
+                            .map(|f| f.preview_data.is_none())
+                            .unwrap_or(false);
+                            
+                        if needs_preview {
+                            // Extract values we need
+                            let file_path = self.files[self.current_file_index].path.clone();
+                            let header_row = self.files[self.current_file_index].header_row;
+                            let delimiter = self.files[self.current_file_index].delimiter.clone();
+                            let sample_size = self.files[self.current_file_index].sample_size;
+                            
+                            // Check cache first
+                            if let Some(cached) = self.preview_cache.get(&file_path).cloned() {
+                                if let Some(file) = self.files.get_mut(self.current_file_index) {
+                                    file.preview_data = Some(cached.clone());
+                                    // Update columns if empty
+                                    if file.columns.is_empty() {
+                                        let data_rows: Vec<&Vec<String>> = cached.rows.iter().collect();
+                                        
+                                        for (i, col_name) in cached.headers.iter().enumerate() {
+                                            let inferred_type = infer_column_type(&data_rows, i);
+                                            let is_id_column = col_name.to_lowercase() == "id";
+                                            
+                                            let config = ColumnConfig {
+                                                name: col_name.clone(),
+                                                data_type: inferred_type,
+                                                include: true,
+                                                is_primary_key: false, // Don't set primary key by default
+                                                not_null: is_id_column,
+                                                unique: is_id_column,
+                                                create_index: false,
+                                            };
+                                            
+                                            file.columns.push(config);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Load preview data
+                                if let Ok(preview) = self.load_preview_data(&file_path, header_row, &delimiter, sample_size) {
+                                    self.preview_cache.insert(file_path.clone(), preview.clone());
+                                    if let Some(file) = self.files.get_mut(self.current_file_index) {
+                                        file.preview_data = Some(preview.clone());
+                                        // Update columns if empty
+                                        if file.columns.is_empty() {
+                                            let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
+                                            
+                                            for (i, col_name) in preview.headers.iter().enumerate() {
+                                                let inferred_type = infer_column_type(&data_rows, i);
+                                                let is_id_column = col_name.to_lowercase() == "id";
+                                                
+                                                let config = ColumnConfig {
+                                                    name: col_name.clone(),
+                                                    data_type: inferred_type,
+                                                    include: true,
+                                                    is_primary_key: false, // Don't set primary key by default
+                                                    not_null: is_id_column,
+                                                    unique: is_id_column,
+                                                    create_index: false,
+                                                };
+                                                
+                                                file.columns.push(config);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                });
-            
-            ui.add_space(10.0);
+            }
+        });
+
+        // Add Files button  
+        ui.horizontal(|ui| {
             if ui.button("Add Files...").clicked() {
                 if let Some(paths) = rfd::FileDialog::new()
                     .add_filter("CSV files", &["csv", "tsv", "txt"])
@@ -476,9 +612,9 @@ impl FileConfigScreen {
 
         // Column configuration table - rendered outside the file borrow
         let file_idx = self.current_file_index;
-        ui.push_id(self.instance_id.with("column_table_section"), |ui| {
+        if file_idx < self.files.len() {
             self.render_column_table(ui, file_idx);
-        });
+        }
     }
 
     fn render_column_table(&mut self, ui: &mut Ui, file_idx: usize) {
@@ -525,6 +661,7 @@ impl FileConfigScreen {
                                 ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Blob, "Blob");
                                 ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Date, "Date");
                                 ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::DateTime, "DateTime");
+                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Boolean, "Boolean");
                             });
                     });
                     
@@ -563,32 +700,31 @@ impl FileConfigScreen {
             if let Some(preview) = &file.preview_data {
                 let available_height = ui.available_height();
                 
-                ui.push_id(self.instance_id.with("data_preview_section"), |ui| {
-                    TableBuilder::new(ui)
-                        .striped(true)
-                        .resizable(true)
-                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                        .columns(Column::auto(), preview.headers.len())
-                        .max_scroll_height(available_height)
-                        .header(20.0, |mut header| {
-                            for col_name in &preview.headers {
-                                header.col(|ui| {
-                                    ui.label(RichText::new(col_name).strong());
-                                });
-                            }
-                        })
-                        .body(|mut body| {
-                            for (idx, data_row) in preview.rows.iter().enumerate() {
-                                body.row(18.0, |mut row| {
-                                    for cell in data_row.iter() {
-                                        row.col(|ui| {
-                                            ui.label(cell);
-                                        });
-                                    }
-                                });
-                            }
-                        });
-                });
+                // Don't use push_id here as it might break the table
+                TableBuilder::new(ui)
+                    .striped(true)
+                    .resizable(true)
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .columns(Column::auto(), preview.headers.len())
+                    .max_scroll_height(available_height)
+                    .header(20.0, |mut header| {
+                        for col_name in &preview.headers {
+                            header.col(|ui| {
+                                ui.label(RichText::new(col_name).strong());
+                            });
+                        }
+                    })
+                    .body(|mut body| {
+                        for (idx, data_row) in preview.rows.iter().enumerate() {
+                            body.row(18.0, |mut row| {
+                                for cell in data_row.iter() {
+                                    row.col(|ui| {
+                                        ui.label(cell);
+                                    });
+                                }
+                            });
+                        }
+                    });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("No preview available");
@@ -605,54 +741,57 @@ impl FileConfigScreen {
             return;
         }
 
+        // Load preview data
+        if let Ok(preview) = self.load_preview_data(&file.path, file.header_row, &file.delimiter, file.sample_size) {
+            self.preview_cache.insert(file.path.clone(), preview.clone());
+            file.preview_data = Some(preview);
+            self.update_columns_from_preview(file);
+        }
+    }
+    
+    fn load_preview_data(&self, path: &PathBuf, header_row: usize, delimiter: &Delimiter, sample_size: usize) -> Result<PreviewData, String> {
         // Load CSV and parse preview
-        match std::fs::read_to_string(&file.path) {
-            Ok(content) => {
-                let lines: Vec<&str> = content.lines().collect();
-                if lines.is_empty() {
-                    self.error_message = Some("File is empty".to_string());
-                    return;
-                }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+            
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return Err("File is empty".to_string());
+        }
 
-                let mut headers = Vec::new();
-                let mut rows = Vec::new();
+        let mut headers = Vec::new();
+        let mut rows = Vec::new();
 
-                // Get headers from specified row
-                if file.header_row > 0 && file.header_row <= lines.len() {
-                    headers = lines[file.header_row - 1]
-                        .split(file.delimiter.as_char())
-                        .map(|s| s.trim().to_string())
-                        .collect();
-                }
+        // Get headers from specified row
+        if header_row > 0 && header_row <= lines.len() {
+            headers = lines[header_row - 1]
+                .split(delimiter.as_char())
+                .map(|s| s.trim().to_string())
+                .collect();
+        }
 
-                // Parse rows for preview, starting AFTER the header row
-                let start_row = file.header_row; // Start after header
-                let end_row = (start_row + file.sample_size).min(lines.len());
-                
-                for idx in start_row..end_row {
-                    if idx < lines.len() {
-                        let cells: Vec<String> = lines[idx]
-                            .split(file.delimiter.as_char())
-                            .map(|s| s.trim().to_string())
-                            .collect();
-                        rows.push(cells);
-                    }
-                }
-
-                let preview_data = PreviewData {
-                    headers: headers.clone(),
-                    rows,
-                };
-
-                // Cache the preview
-                self.preview_cache.insert(file.path.clone(), preview_data.clone());
-                file.preview_data = Some(preview_data);
-                self.update_columns_from_preview(file);
-            }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to read file: {}", e));
+        // Parse rows for preview, starting AFTER the header row
+        let start_row = header_row; // Start after header
+        let end_row = (start_row + sample_size).min(lines.len());
+        
+        for idx in start_row..end_row {
+            if idx < lines.len() {
+                let cells: Vec<String> = lines[idx]
+                    .split(delimiter.as_char())
+                    .map(|s| s.trim().to_string())
+                    .collect();
+                rows.push(cells);
             }
         }
+
+        // Store in cache for reuse
+        let preview = PreviewData {
+            headers,
+            rows,
+            total_rows: lines.len() - header_row,
+        };
+        
+        Ok(preview)
     }
 
     fn update_columns_from_preview(&mut self, file: &mut FileConfig) {
@@ -662,54 +801,27 @@ impl FileConfigScreen {
             // Infer types from data rows (all rows are now data rows, no header)
             let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
             
-            for (i, header) in preview.headers.iter().enumerate() {
-                let column_type = self.infer_column_type(&data_rows, i);
-                let is_id_column = header.to_lowercase() == "id";
+            for (i, col_name) in preview.headers.iter().enumerate() {
+                let inferred_type = infer_column_type(&data_rows, i);
+                let is_id_column = col_name.to_lowercase() == "id";
                 
-                file.columns.push(ColumnConfig {
-                    name: header.clone(),
-                    data_type: column_type,
+                let config = ColumnConfig {
+                    name: col_name.clone(),
+                    data_type: inferred_type,
                     include: true,
-                    is_primary_key: is_id_column, // Set id column as primary key
-                    not_null: false,
-                    unique: false,
+                    is_primary_key: false, // Don't set primary key by default
+                    not_null: is_id_column,
+                    unique: is_id_column,
                     create_index: false,
-                });
+                };
+
+                file.columns.push(config);
             }
         }
     }
 
     fn infer_column_type(&self, rows: &[&Vec<String>], col_idx: usize) -> ColumnType {
-        let mut all_integer = true;
-        let mut all_real = true;
-        let mut has_values = false;
-
-        for row in rows {
-            if let Some(value) = row.get(col_idx) {
-                let trimmed = value.trim();
-                if !trimmed.is_empty() {
-                    has_values = true;
-                    
-                    // Check if it's an integer
-                    if trimmed.parse::<i64>().is_err() {
-                        all_integer = false;
-                    }
-                    
-                    // Check if it's a real number
-                    if trimmed.parse::<f64>().is_err() {
-                        all_real = false;
-                    }
-                }
-            }
-        }
-
-        if !has_values || (!all_integer && !all_real) {
-            ColumnType::Text
-        } else if all_integer {
-            ColumnType::Integer
-        } else {
-            ColumnType::Real
-        }
+        infer_column_type(rows, col_idx)
     }
 
     fn create_database(&mut self) -> Vec<TableInfo> {
