@@ -31,17 +31,30 @@ The ID conflicts were resolved by implementing comprehensive unique IDs for ALL 
    - File index and row index are used to ensure uniqueness across multiple files
    - Removed default primary key selection for ID columns
 
+### Additional Fixes Applied
+
+5. **Fixed file switching crash**:
+   - Changed from `selectable_value` to `selectable_label` in the file dropdown
+   - Added bounds checking when accessing files array
+   - Properly handle file preview loading after selection
+
+6. **Added header row highlighting**:
+   - First row in data preview is highlighted when header_row=1
+   - Uses blue colored bold text to distinguish header from data
+   - Implemented with `RichText::new(cell).strong().color(Color32::from_rgb(120, 200, 255))`
+
 ### Why This Solution Works
 - Every widget has a unique ID based on its context (file index, row index, purpose)
 - Tables are wrapped in unique scopes preventing internal ScrollArea conflicts
 - The hierarchical ID structure ensures no conflicts even with multiple files
 - Using format strings with indices guarantees uniqueness
+- File switching is handled safely with proper bounds checking
 
 ## Result
 ✅ All egui ID conflict warnings are resolved
 ✅ File switching works without crashes
-✅ Data preview displays correctly
+✅ Data preview displays correctly with header highlighting
 ✅ All functionality preserved
 ✅ No primary key is selected by default
 
-The application now handles multiple CSV imports cleanly without any ID conflict warnings. 
+The application now handles multiple CSV imports cleanly without any ID conflict warnings or crashes. 
