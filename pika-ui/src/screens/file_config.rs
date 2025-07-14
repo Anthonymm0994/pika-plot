@@ -368,6 +368,7 @@ impl FileConfigScreen {
         }
 
         // CSV File selector
+        let mut needs_preview_load = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("CSV File:").color(Color32::from_gray(200)));
             ui.add_space(10.0);
@@ -390,86 +391,60 @@ impl FileConfigScreen {
                                 .unwrap_or("unknown");
                             
                             if ui.selectable_label(self.current_file_index == idx, name).clicked() {
-                                self.current_file_index = idx;
-                            }
-                        }
-                    });
-                    
-                    // Handle preview loading after file selection
-                    if self.current_file_index < self.files.len() {
-                        let needs_preview = self.files.get(self.current_file_index)
-                            .map(|f| f.preview_data.is_none())
-                            .unwrap_or(false);
-                            
-                        if needs_preview {
-                            // Extract values we need with bounds checking
-                            if let Some(file) = self.files.get(self.current_file_index) {
-                                let file_path = file.path.clone();
-                                let header_row = file.header_row;
-                                let delimiter = file.delimiter.clone();
-                                let sample_size = file.sample_size;
-                                
-                                // Check cache first
-                                if let Some(cached) = self.preview_cache.get(&file_path).cloned() {
-                                    if let Some(file) = self.files.get_mut(self.current_file_index) {
-                                        file.preview_data = Some(cached.clone());
-                                        // Update columns if empty
-                                        if file.columns.is_empty() {
-                                            let data_rows: Vec<&Vec<String>> = cached.rows.iter().collect();
-                                            
-                                            for (i, col_name) in cached.headers.iter().enumerate() {
-                                                let inferred_type = infer_column_type(&data_rows, i);
-                                                let is_id_column = col_name.to_lowercase() == "id";
-                                                
-                                                let config = ColumnConfig {
-                                                    name: col_name.clone(),
-                                                    data_type: inferred_type,
-                                                    include: true,
-                                                    is_primary_key: false, // Don't set primary key by default
-                                                    not_null: is_id_column,
-                                                    unique: is_id_column,
-                                                    create_index: false,
-                                                };
-                                                
-                                                file.columns.push(config);
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Load preview data
-                                    if let Ok(preview) = self.load_preview_data(&file_path, header_row, &delimiter, sample_size) {
-                                        self.preview_cache.insert(file_path.clone(), preview.clone());
-                                        if let Some(file) = self.files.get_mut(self.current_file_index) {
-                                            file.preview_data = Some(preview.clone());
-                                            // Update columns if empty
-                                            if file.columns.is_empty() {
-                                                let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
-                                                
-                                                for (i, col_name) in preview.headers.iter().enumerate() {
-                                                    let inferred_type = infer_column_type(&data_rows, i);
-                                                    let is_id_column = col_name.to_lowercase() == "id";
-                                                    
-                                                    let config = ColumnConfig {
-                                                        name: col_name.clone(),
-                                                        data_type: inferred_type,
-                                                        include: true,
-                                                        is_primary_key: false, // Don't set primary key by default
-                                                        not_null: is_id_column,
-                                                        unique: is_id_column,
-                                                        create_index: false,
-                                                    };
-                                                    
-                                                    file.columns.push(config);
-                                                }
-                                            }
-                                        }
-                                    }
+                                if self.current_file_index != idx {
+                                    self.current_file_index = idx;
+                                    needs_preview_load = true;
                                 }
                             }
                         }
-                    }
+                    });
             }
         });
+        
+        // Load preview if file selection changed
+        if needs_preview_load && self.current_file_index < self.files.len() {
+            let should_load = self.files.get(self.current_file_index)
+                .map(|f| f.preview_data.is_none())
+                .unwrap_or(false);
+                
+            if should_load {
+                // Extract the data we need to avoid borrow checker issues
+                let (file_path, header_row, delimiter, sample_size) = {
+                    let file = &self.files[self.current_file_index];
+                    (file.path.clone(), file.header_row, file.delimiter.clone(), file.sample_size)
+                };
+                
+                // Load preview data
+                if let Ok(preview) = self.load_preview_data(&file_path, header_row, &delimiter, sample_size) {
+                    self.preview_cache.insert(file_path.clone(), preview.clone());
+                    if let Some(file) = self.files.get_mut(self.current_file_index) {
+                        file.preview_data = Some(preview.clone());
+                        
+                        // Update columns if empty (inline to avoid borrow checker issues)
+                        if file.columns.is_empty() {
+                            let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
+                            
+                            for (i, col_name) in preview.headers.iter().enumerate() {
+                                let inferred_type = infer_column_type(&data_rows, i);
+                                let is_id_column = col_name.to_lowercase() == "id";
+                                
+                                let config = ColumnConfig {
+                                    name: col_name.clone(),
+                                    data_type: inferred_type,
+                                    include: true,
+                                    is_primary_key: false,
+                                    not_null: is_id_column,
+                                    unique: is_id_column,
+                                    create_index: false,
+                                };
+                                
+                                file.columns.push(config);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Add Files button  
         ui.horizontal(|ui| {
@@ -766,91 +741,122 @@ impl FileConfigScreen {
         // Check cache first
         if let Some(cached) = self.preview_cache.get(&file.path) {
             file.preview_data = Some(cached.clone());
-            self.update_columns_from_preview(file);
+            
+            // Update columns if empty (inline to avoid borrow checker issues)
+            if file.columns.is_empty() {
+                let data_rows: Vec<&Vec<String>> = cached.rows.iter().collect();
+                
+                for (i, col_name) in cached.headers.iter().enumerate() {
+                    let inferred_type = infer_column_type(&data_rows, i);
+                    let is_id_column = col_name.to_lowercase() == "id";
+                    
+                    let config = ColumnConfig {
+                        name: col_name.clone(),
+                        data_type: inferred_type,
+                        include: true,
+                        is_primary_key: false,
+                        not_null: is_id_column,
+                        unique: is_id_column,
+                        create_index: false,
+                    };
+                    
+                    file.columns.push(config);
+                }
+            }
             return;
         }
 
         // Load preview data
         if let Ok(preview) = self.load_preview_data(&file.path, file.header_row, &file.delimiter, file.sample_size) {
             self.preview_cache.insert(file.path.clone(), preview.clone());
-            file.preview_data = Some(preview);
-            self.update_columns_from_preview(file);
+            file.preview_data = Some(preview.clone());
+            
+            // Update columns if empty (inline to avoid borrow checker issues)
+            if file.columns.is_empty() {
+                let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
+                
+                for (i, col_name) in preview.headers.iter().enumerate() {
+                    let inferred_type = infer_column_type(&data_rows, i);
+                    let is_id_column = col_name.to_lowercase() == "id";
+                    
+                    let config = ColumnConfig {
+                        name: col_name.clone(),
+                        data_type: inferred_type,
+                        include: true,
+                        is_primary_key: false,
+                        not_null: is_id_column,
+                        unique: is_id_column,
+                        create_index: false,
+                    };
+                    
+                    file.columns.push(config);
+                }
+            }
         }
     }
     
     fn load_preview_data(&self, path: &PathBuf, header_row: usize, delimiter: &Delimiter, sample_size: usize) -> Result<PreviewData, String> {
-        // Load CSV and parse preview
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-            
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.is_empty() {
-            return Err("File is empty".to_string());
-        }
-
+        use std::fs::File;
+        use std::io::{BufReader, BufRead};
+        
+        // Open file with buffered reader for efficient line-by-line reading
+        let file = File::open(path)
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        let reader = BufReader::new(file);
+        let mut lines_iter = reader.lines();
+        
         let mut headers = Vec::new();
         let mut rows = Vec::new();
-
-        // Get headers from specified row
-        if header_row > 0 && header_row <= lines.len() {
-            headers = lines[header_row - 1]
-                .split(delimiter.as_char())
-                .map(|s| s.trim().to_string())
-                .collect();
-        }
-
-        // Parse rows for preview, starting AFTER the header row
-        let start_row = header_row; // Start after header
-        let end_row = (start_row + sample_size).min(lines.len());
+        let mut line_count = 0;
+        let mut total_lines = 0;
         
-        for idx in start_row..end_row {
-            if idx < lines.len() {
-                let cells: Vec<String> = lines[idx]
+        // Read only the lines we need
+        for (idx, line_result) in lines_iter.by_ref().enumerate() {
+            let line = line_result.map_err(|e| format!("Failed to read line: {}", e))?;
+            line_count = idx + 1;
+            
+            // Get headers from specified row
+            if line_count == header_row {
+                headers = line
+                    .split(delimiter.as_char())
+                    .map(|s| s.trim().to_string())
+                    .collect();
+            }
+            
+            // Collect sample rows after header
+            if line_count > header_row && rows.len() < sample_size {
+                let cells: Vec<String> = line
                     .split(delimiter.as_char())
                     .map(|s| s.trim().to_string())
                     .collect();
                 rows.push(cells);
             }
+            
+            // Stop reading once we have enough sample data
+            if line_count >= header_row && rows.len() >= sample_size {
+                // Count remaining lines for total_rows (quick scan)
+                total_lines = line_count + lines_iter.count();
+                break;
+            }
+        }
+        
+        // If we read all lines, use the line count
+        if total_lines == 0 {
+            total_lines = line_count;
+        }
+        
+        if headers.is_empty() {
+            return Err("No headers found at specified row".to_string());
         }
 
         // Store in cache for reuse
         let preview = PreviewData {
             headers,
             rows,
-            total_rows: lines.len() - header_row,
+            total_rows: total_lines.saturating_sub(header_row),
         };
-        
+
         Ok(preview)
-    }
-
-    fn update_columns_from_preview(&mut self, file: &mut FileConfig) {
-        if let Some(preview) = &file.preview_data {
-            file.columns.clear();
-            
-            // Infer types from data rows (all rows are now data rows, no header)
-            let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
-            
-            for (i, col_name) in preview.headers.iter().enumerate() {
-                let inferred_type = infer_column_type(&data_rows, i);
-                let is_id_column = col_name.to_lowercase() == "id";
-                
-                let config = ColumnConfig {
-                    name: col_name.clone(),
-                    data_type: inferred_type,
-                    include: true,
-                    is_primary_key: false, // Don't set primary key by default
-                    not_null: is_id_column,
-                    unique: is_id_column,
-                    create_index: false,
-                };
-
-                file.columns.push(config);
-            }
-        }
-    }
-
-    fn infer_column_type(&self, rows: &[&Vec<String>], col_idx: usize) -> ColumnType {
-        infer_column_type(rows, col_idx)
     }
 
     fn create_database(&mut self) -> Vec<TableInfo> {
