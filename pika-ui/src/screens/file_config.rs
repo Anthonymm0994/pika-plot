@@ -8,7 +8,7 @@ use pika_core::types::{ColumnInfo, TableInfo};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FileConfigScreen {
     /// List of files being configured
     files: Vec<FileConfig>,
@@ -22,6 +22,7 @@ pub struct FileConfigScreen {
     preview_cache: HashMap<PathBuf, PreviewData>,
     /// Whether we need to show the file picker on initialization
     show_file_picker_on_init: bool,
+    instance_id: egui::Id,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +139,7 @@ impl FileConfigScreen {
             error_message: None,
             preview_cache: HashMap::new(),
             show_file_picker_on_init: true,
+            instance_id: egui::Id::new("file_config_instance").with(std::time::SystemTime::now()),
         }
     }
 
@@ -193,98 +195,100 @@ impl FileConfigScreen {
         egui::CentralPanel::default()
             .frame(frame)
             .show(ctx, |ui| {
-                // Title bar
-                ui.horizontal(|ui| {
-                    ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("✕").size(20.0)).clicked() {
-                            state.view_mode = crate::state::ViewMode::Canvas;
-                        }
-                    });
-                });
-
-                ui.add_space(10.0);
-
-                // Database path
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
-                    ui.add_space(10.0);
-                    
-                    let available_width = ui.available_width() - 100.0; // Leave space for Browse button
-                    let path_display = self.database_path.to_string_lossy().to_string();
-                    ui.add(egui::TextEdit::singleline(&mut path_display.clone())
-                        .desired_width(available_width.min(400.0))
-                        .interactive(false)
-                        .text_color(Color32::from_gray(180)));
-                    
-                    if ui.button("Browse...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
-                            .save_file()
-                        {
-                            self.database_path = path;
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-
-                // Use available space for the main content
-                let available_size = ui.available_size();
-                let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
-                let right_width = available_size.x - left_width - 10.0;
-
-                ui.horizontal_top(|ui| {
-                    // Left column - Configuration
-                    ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
-                        ui.vertical(|ui| {
-                            self.render_configuration_panel(ui);
+                ui.push_id(self.instance_id.with("file_config_screen"), |ui| {
+                    // Title bar
+                    ui.horizontal(|ui| {
+                        ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("✕").size(20.0)).clicked() {
+                                state.view_mode = crate::state::ViewMode::Canvas;
+                            }
                         });
                     });
 
                     ui.add_space(10.0);
 
-                    // Right column - Preview
-                    ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
-                        ui.group(|ui| {
-                            ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
-                            ui.separator();
-                            self.render_data_preview(ui);
-                        });
-                    });
-                });
-
-                ui.add_space(10.0);
-
-                // Bottom buttons
-                ui.horizontal(|ui| {
-                    if ui.button(RichText::new("Cancel").size(14.0)).clicked() {
-                        state.view_mode = crate::state::ViewMode::Canvas;
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let enabled = !self.files.is_empty() && self.files.iter().any(|f| 
-                            f.columns.iter().any(|c| c.include)
-                        );
+                    // Database path
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
+                        ui.add_space(10.0);
                         
-                        let button = egui::Button::new(
-                            RichText::new(format!("✓ Create Database with {} Tables", self.files.len()))
-                                .size(14.0)
-                                .color(Color32::WHITE)
-                        )
-                        .fill(if enabled { Color32::from_rgb(34, 139, 34) } else { Color32::from_gray(60) });
-
-                        if ui.add_enabled(enabled, button).clicked() {
-                            result = Some(self.create_database());
-                            state.view_mode = crate::state::ViewMode::Canvas;
+                        let available_width = ui.available_width() - 100.0; // Leave space for Browse button
+                        let path_display = self.database_path.to_string_lossy().to_string();
+                        ui.add(egui::TextEdit::singleline(&mut path_display.clone())
+                            .desired_width(available_width.min(400.0))
+                            .interactive(false)
+                            .text_color(Color32::from_gray(180)));
+                        
+                        if ui.button("Browse...").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
+                                .save_file()
+                            {
+                                self.database_path = path;
+                            }
                         }
                     });
-                });
 
-                // Error display
-                if let Some(error) = &self.error_message {
-                    ui.colored_label(Color32::from_rgb(255, 100, 100), error);
-                }
+                    ui.add_space(10.0);
+
+                    // Use available space for the main content
+                    let available_size = ui.available_size();
+                    let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
+                    let right_width = available_size.x - left_width - 10.0;
+
+                    ui.horizontal_top(|ui| {
+                        // Left column - Configuration
+                        ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
+                            ui.vertical(|ui| {
+                                self.render_configuration_panel(ui);
+                            });
+                        });
+
+                        ui.add_space(10.0);
+
+                        // Right column - Preview
+                        ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
+                            ui.group(|ui| {
+                                ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
+                                ui.separator();
+                                self.render_data_preview(ui);
+                            });
+                        });
+                    });
+
+                    ui.add_space(10.0);
+
+                    // Bottom buttons
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("Cancel").size(14.0)).clicked() {
+                            state.view_mode = crate::state::ViewMode::Canvas;
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let enabled = !self.files.is_empty() && self.files.iter().any(|f| 
+                                f.columns.iter().any(|c| c.include)
+                            );
+                            
+                            let button = egui::Button::new(
+                                RichText::new(format!("✓ Create Database with {} Tables", self.files.len()))
+                                    .size(14.0)
+                                    .color(Color32::WHITE)
+                            )
+                            .fill(if enabled { Color32::from_rgb(34, 139, 34) } else { Color32::from_gray(60) });
+
+                            if ui.add_enabled(enabled, button).clicked() {
+                                result = Some(self.create_database());
+                                state.view_mode = crate::state::ViewMode::Canvas;
+                            }
+                        });
+                    });
+
+                    // Error display
+                    if let Some(error) = &self.error_message {
+                        ui.colored_label(Color32::from_rgb(255, 100, 100), error);
+                    }
+                });
             });
 
         result
@@ -472,7 +476,9 @@ impl FileConfigScreen {
 
         // Column configuration table - rendered outside the file borrow
         let file_idx = self.current_file_index;
-        self.render_column_table(ui, file_idx);
+        ui.push_id(self.instance_id.with("column_table_section"), |ui| {
+            self.render_column_table(ui, file_idx);
+        });
     }
 
     fn render_column_table(&mut self, ui: &mut Ui, file_idx: usize) {
@@ -557,30 +563,32 @@ impl FileConfigScreen {
             if let Some(preview) = &file.preview_data {
                 let available_height = ui.available_height();
                 
-                TableBuilder::new(ui)
-                    .striped(true)
-                    .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .columns(Column::auto(), preview.headers.len())
-                    .max_scroll_height(available_height)
-                    .header(20.0, |mut header| {
-                        for col_name in &preview.headers {
-                            header.col(|ui| {
-                                ui.label(RichText::new(col_name).strong());
-                            });
-                        }
-                    })
-                    .body(|mut body| {
-                        for (idx, data_row) in preview.rows.iter().enumerate() {
-                            body.row(18.0, |mut row| {
-                                for cell in data_row.iter() {
-                                    row.col(|ui| {
-                                        ui.label(cell);
-                                    });
-                                }
-                            });
-                        }
-                    });
+                ui.push_id(self.instance_id.with("data_preview_section"), |ui| {
+                    TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(true)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .columns(Column::auto(), preview.headers.len())
+                        .max_scroll_height(available_height)
+                        .header(20.0, |mut header| {
+                            for col_name in &preview.headers {
+                                header.col(|ui| {
+                                    ui.label(RichText::new(col_name).strong());
+                                });
+                            }
+                        })
+                        .body(|mut body| {
+                            for (idx, data_row) in preview.rows.iter().enumerate() {
+                                body.row(18.0, |mut row| {
+                                    for cell in data_row.iter() {
+                                        row.col(|ui| {
+                                            ui.label(cell);
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("No preview available");

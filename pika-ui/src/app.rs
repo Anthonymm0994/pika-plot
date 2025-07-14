@@ -163,7 +163,7 @@ impl CanvasToolbar {
                 let canvas_node = crate::state::CanvasNode {
                     id: node_id,
                     position: egui::Vec2::new(100.0, 100.0),
-                    size: egui::Vec2::new(200.0, 150.0),
+                    size: egui::Vec2::new(600.0, 400.0), // Larger size like Pebble
                     node_type: crate::state::CanvasNodeType::Table { 
                         table_info: table_info.clone()
                     },
@@ -456,6 +456,8 @@ impl App {
                         // TODO: Show database open dialog
                     }
                     MenuAction::ImportCsv => {
+                        // Reset the file config screen to show file picker
+                        self.file_config_screen = FileConfigScreen::new();
                         self.state.view_mode = crate::state::ViewMode::FileConfig;
                     }
                     MenuAction::Save => {

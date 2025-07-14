@@ -11,10 +11,16 @@ use std::collections::{HashMap, HashSet};
 use pika_core::NodeId;
 use tokio::sync::broadcast::Sender;
 
-const RESIZE_HANDLE_SIZE: f32 = 8.0;
+// Constants for canvas rendering
 const MIN_NODE_SIZE: f32 = 50.0;
-const DEFAULT_TABLE_SIZE: Vec2 = Vec2::new(400.0, 300.0);
-const DEFAULT_PLOT_SIZE: Vec2 = Vec2::new(350.0, 250.0);
+const RESIZE_HANDLE_SIZE: f32 = 8.0;
+const CONNECTION_LINE_WIDTH: f32 = 2.0;
+const CONNECTION_ARROW_SIZE: f32 = 10.0;
+const GRID_SIZE: f32 = 20.0;
+const VISIBLE_MARGIN: f32 = 100.0;
+const CELL_SIZE: f32 = 100.0;
+const DEFAULT_PLOT_SIZE: Vec2 = Vec2::new(450.0, 350.0);
+const DEFAULT_TABLE_SIZE: Vec2 = Vec2::new(600.0, 400.0);
 const DEFAULT_SHAPE_SIZE: Vec2 = Vec2::new(150.0, 100.0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +34,16 @@ enum ResizeHandle {
 /// Spatial index cell for fast hit testing
 struct SpatialCell {
     nodes: Vec<NodeId>,
+}
+
+// Button rectangles for table nodes
+struct TableButtonRects {
+    previous: Rect,
+    next: Rect,
+    execute: Rect,
+    create_plot: Rect,
+    export_page: Rect,
+    export_all: Rect,
 }
 
 /// Canvas panel for node-based visualization.
@@ -65,6 +81,10 @@ pub struct CanvasPanel {
     cached_grid: Option<Vec<Shape>>,
     frame_count: u64,
     last_interaction_frame: u64,
+    
+    /// Table button rectangles for click detection
+    table_button_rects: HashMap<NodeId, TableButtonRects>,
+    show_plot_menu_for_node: Option<NodeId>,
 }
 
 impl CanvasPanel {
@@ -88,6 +108,8 @@ impl CanvasPanel {
             cached_grid: None,
             frame_count: 0,
             last_interaction_frame: 0,
+            table_button_rects: HashMap::new(),
+            show_plot_menu_for_node: None,
         }
     }
     
@@ -260,6 +282,12 @@ impl CanvasPanel {
             from_screen(response.rect.max)
         );
         
+        // Clear button rects before drawing nodes
+        self.table_button_rects.clear();
+        
+        // Temporary collection for button rects
+        let mut new_button_rects = Vec::new();
+        
         // Draw canvas nodes with frustum culling
         for (node_id, node) in &state.canvas_nodes {
             // Skip nodes outside visible area
@@ -273,12 +301,22 @@ impl CanvasPanel {
             }
             
             let is_selected = state.selected_node == Some(*node_id);
-            self.draw_node(&painter, node, to_screen, is_selected, state);
+            let button_rects = self.draw_node(&painter, node, to_screen, is_selected, state);
+            
+            // Collect button rects if any
+            if let Some(rects) = button_rects {
+                new_button_rects.push((*node_id, rects));
+            }
             
             // Draw resize handles for selected nodes
             if is_selected && state.tool_mode == ToolMode::Select {
                 self.draw_resize_handles(&painter, node, to_screen);
             }
+        }
+        
+        // Update button rects after the loop
+        for (node_id, rects) in new_button_rects {
+            self.table_button_rects.insert(node_id, rects);
         }
         
         // Handle right-click context menu with improved hit testing
@@ -304,7 +342,11 @@ impl CanvasPanel {
             menu_area.show(ui.ctx(), |ui| {
                 ui.set_min_width(150.0);
                 
-                if let Some(node_id) = clicked_node {
+                // Check if we should show plot menu
+                if let Some(plot_node_id) = self.show_plot_menu_for_node {
+                    self.show_plot_creation_menu(ui, state, plot_node_id);
+                    self.show_plot_menu_for_node = None;
+                } else if let Some(node_id) = clicked_node {
                     self.show_node_context_menu(ui, state, node_id);
                 } else {
                     self.show_canvas_context_menu(ui, state, menu_pos);
@@ -357,6 +399,79 @@ impl CanvasPanel {
     }
     
     fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
+        let canvas_pos = from_screen(response.hover_pos().unwrap_or(Pos2::ZERO));
+        
+        // Check for table button clicks first
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let click_pos = from_screen(pos);
+                
+                // Check each table node's buttons
+                for (node_id, button_rects) in &self.table_button_rects {
+                    // Convert button rects to screen space for comparison
+                    let screen_pos = to_screen(click_pos);
+                    
+                    // Previous button
+                    if button_rects.previous.contains(screen_pos) {
+                        if let Some(preview) = state.node_data.get_mut(node_id) {
+                            if preview.current_page > 0 {
+                                preview.current_page -= 1;
+                                state.execute_node_query_with_pagination(*node_id);
+                            }
+                        }
+                        return;
+                    }
+                    
+                    // Next button
+                    if button_rects.next.contains(screen_pos) {
+                        if let Some(preview) = state.node_data.get(node_id) {
+                            let total_pages = preview.total_rows
+                                .map(|total| ((total as f32) / preview.page_size as f32).ceil() as usize)
+                                .unwrap_or(1);
+                            if preview.current_page + 1 < total_pages {
+                                if let Some(preview_mut) = state.node_data.get_mut(node_id) {
+                                    preview_mut.current_page += 1;
+                                    state.execute_node_query_with_pagination(*node_id);
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    
+                    // Execute button
+                    if button_rects.execute.contains(screen_pos) {
+                        state.execute_node_query_with_pagination(*node_id);
+                        return;
+                    }
+                    
+                    // Create Plot button
+                    if button_rects.create_plot.contains(screen_pos) {
+                        // Set a flag to show plot menu for this node
+                        self.context_menu_pos = Some(screen_pos);
+                        state.selected_node = Some(*node_id);
+                        self.show_plot_menu_for_node = Some(*node_id);
+                        return;
+                    }
+                    
+                    // Export Page button
+                    if button_rects.export_page.contains(screen_pos) {
+                        // TODO: Implement export page
+                        println!("Export page for node {:?}", node_id);
+                        return;
+                    }
+                    
+                    // Export All button
+                    if button_rects.export_all.contains(screen_pos) {
+                        // TODO: Implement export all
+                        println!("Export all for node {:?}", node_id);
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // Rest of the select tool handling...
+        // Check if clicking on resize handle
         if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let canvas_pos = from_screen(pos);
@@ -601,93 +716,10 @@ impl CanvasPanel {
                         state.node_queries.insert(node_id, query.clone());
                     }
                     
-                    // Execute on Ctrl+Enter
-                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl) {
-                        state.execute_node_query(node_id);
-                    }
-                    
                     ui.separator();
                     
-                    // Quick plot creation
-                    if ui.button("Create Histogram").clicked() {
-                        self.create_plot_from_table(state, node_id, "Histogram");
-                        ui.close_menu();
-                    }
-                    if ui.button("Create Line Plot").clicked() {
-                        self.create_plot_from_table(state, node_id, "Line");
-                        ui.close_menu();
-                    }
-                    if ui.button("Create Scatter Plot").clicked() {
-                        self.create_plot_from_table(state, node_id, "Scatter");
-                        ui.close_menu();
-                    }
-                    if ui.button("Create Bar Chart").clicked() {
-                        self.create_plot_from_table(state, node_id, "Bar");
-                        ui.close_menu();
-                    }
-                    
-                    ui.separator();
-                    
-                    // More plot types
-                    ui.menu_button("More Plots", |ui| {
-                        if ui.button("Box Plot").clicked() {
-                            self.create_plot_from_table(state, node_id, "BoxPlot");
-                            ui.close_menu();
-                        }
-                        if ui.button("Violin Plot").clicked() {
-                            self.create_plot_from_table(state, node_id, "Violin");
-                            ui.close_menu();
-                        }
-                        if ui.button("Heatmap").clicked() {
-                            self.create_plot_from_table(state, node_id, "Heatmap");
-                            ui.close_menu();
-                        }
-                        if ui.button("Correlation Matrix").clicked() {
-                            self.create_plot_from_table(state, node_id, "Correlation");
-                            ui.close_menu();
-                        }
-                    });
-                    
-                    ui.separator();
-                    
-                    // Time series specific
-                    if ui.button("Create Time Series").clicked() {
-                        self.create_plot_from_table(state, node_id, "TimeSeries");
-                        ui.close_menu();
-                    }
-                    if ui.button("Create Radar Chart").clicked() {
-                        self.create_plot_from_table(state, node_id, "Radar");
-                        ui.close_menu();
-                    }
-                    
-                    ui.separator();
-                    
-                    if ui.button("Delete").clicked() {
-                        state.canvas_nodes.remove(&node_id);
-                        state.selected_node = None;
-                        ui.close_menu();
-                    }
-                    
-                    ui.separator();
-                    
-                    // Connection options for table nodes
-                    if ui.button("Create Connection From Here").clicked() {
-                        self.connecting_from = Some(node_id);
-                        ui.close_menu();
-                    }
-                    
-                    ui.separator();
-                    
-                    // Create plot submenu
-                    ui.menu_button("Create Plot", |ui| {
-                        for plot_type in &["Line", "Bar", "Scatter", "Histogram", "Box", "Violin", 
-                                          "Heatmap", "Correlation", "Time Series", "Radar"] {
-                            if ui.button(*plot_type).clicked() {
-                                self.create_plot_from_table(state, node_id, plot_type);
-                                ui.close_menu();
-                            }
-                        }
-                    });
+                    // Add plot creation options
+                    self.show_plot_creation_menu(ui, state, node_id);
                 }
                 _ => {
                     if ui.button("Delete").clicked() {
@@ -799,7 +831,7 @@ impl CanvasPanel {
         }
     }
     
-    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, selected: bool, state: &AppState) {
+    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, selected: bool, state: &AppState) -> Option<TableButtonRects> {
         let rect = Rect::from_min_size(
             to_screen(Pos2::new(node.position.x, node.position.y)),
             node.size
@@ -807,247 +839,538 @@ impl CanvasPanel {
         
         match &node.node_type {
             CanvasNodeType::Table { table_info } => {
-                // Draw table node with data preview
+                // Draw table node with Pebble-style design
                 painter.rect_filled(
                     rect,
-                    5.0,
-                    if selected { Color32::from_rgb(50, 50, 70) } else { Color32::from_rgb(35, 35, 50) },
+                    8.0,
+                    if selected { Color32::from_rgb(45, 45, 45) } else { Color32::from_rgb(35, 35, 35) },
                 );
                 painter.rect_stroke(
                     rect,
-                    5.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(100, 150, 250) } else { Color32::from_gray(80) }),
+                    8.0,
+                    Stroke::new(2.0, if selected { Color32::from_rgb(100, 150, 250) } else { Color32::from_gray(60) }),
                 );
                 
-                // Title bar
-                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 30.0));
-                painter.rect_filled(title_rect, 5.0, Color32::from_rgb(45, 45, 65));
+                // Title bar with table name
+                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 40.0));
+                painter.rect_filled(
+                    title_rect, 
+                    egui::Rounding::same(8.0),
+                    Color32::from_rgb(50, 50, 50)
+                );
                 
                 painter.text(
-                    title_rect.min + Vec2::new(10.0, 8.0),
-                    egui::Align2::LEFT_TOP,
+                    title_rect.center(),
+                    egui::Align2::CENTER_CENTER,
                     &table_info.name,
-                    FontId::proportional(14.0 * self.zoom),
+                    FontId::proportional(16.0 * self.zoom),
                     Color32::WHITE,
                 );
                 
-                // Query editor area
-                let query_height = 60.0;
+                // SQL Query display area
                 let query_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(5.0, 35.0),
-                    Vec2::new(rect.width() - 10.0, query_height),
+                    rect.min + Vec2::new(10.0, 50.0),
+                    Vec2::new(rect.width() - 20.0, 40.0),
                 );
                 
-                painter.rect_filled(query_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                painter.rect_filled(query_rect, 4.0, Color32::from_rgb(25, 25, 25));
+                painter.rect_stroke(query_rect, 4.0, Stroke::new(1.0, Color32::from_gray(60)));
                 
-                // Draw query text
-                if let Some(query) = state.node_queries.get(&node.id) {
-                    painter.text(
-                        query_rect.min + Vec2::new(5.0, 5.0),
-                        egui::Align2::LEFT_TOP,
-                        query,
-                        FontId::monospace(12.0 * self.zoom),
-                        Color32::from_gray(200),
-                    );
-                    
-                    // Show cursor if selected
-                    if selected {
-                        let cursor_pos = query_rect.min + Vec2::new(5.0 + query.len() as f32 * 7.0, 5.0);
-                        painter.line_segment(
-                            [cursor_pos, cursor_pos + Vec2::new(0.0, 14.0)],
-                            Stroke::new(1.0, Color32::WHITE),
-                        );
-                    }
-                } else {
-                    painter.text(
-                        query_rect.min + Vec2::new(5.0, 5.0),
-                        egui::Align2::LEFT_TOP,
-                        "SELECT * FROM table LIMIT 10",
-                        FontId::monospace(12.0 * self.zoom),
-                        Color32::from_gray(120),
-                    );
-                }
+                // Get query or use default
+                let query = state.node_queries.get(&node.id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("SELECT * FROM '{}'", table_info.name));
                 
-                // Hint text
                 painter.text(
-                    query_rect.max - Vec2::new(5.0, 5.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    "Ctrl+Enter to run",
-                    FontId::proportional(10.0 * self.zoom),
-                    Color32::from_gray(100),
+                    query_rect.min + Vec2::new(10.0, 10.0),
+                    egui::Align2::LEFT_TOP,
+                    &format!("SQL Query:\n{}", query),
+                    FontId::monospace(12.0 * self.zoom),
+                    Color32::from_gray(200),
                 );
                 
-                // Data preview area (below query)
-                let data_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(5.0, 100.0),
-                    Vec2::new(rect.width() - 10.0, rect.height() - 105.0),
+                // Results info
+                let row_count = table_info.row_count.unwrap_or(0);
+                let showing_rows = 25; // Default page size
+                let current_page = 1; // TODO: Track current page in state
+                let total_pages = (row_count as f32 / showing_rows as f32).ceil() as usize;
+                
+                painter.text(
+                    rect.min + Vec2::new(10.0, 100.0),
+                    egui::Align2::LEFT_TOP,
+                    &format!("Results: {} rows (showing {}-{})", 
+                        row_count,
+                        (current_page - 1) * showing_rows + 1,
+                        (current_page * showing_rows).min(row_count)
+                    ),
+                    FontId::proportional(13.0 * self.zoom),
+                    Color32::from_gray(180),
                 );
                 
-                painter.rect_filled(data_rect, 2.0, Color32::from_rgb(20, 20, 30));
+                // Data table area
+                let table_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(10.0, 125.0),
+                    Vec2::new(rect.width() - 20.0, rect.height() - 180.0),
+                );
+                
+                painter.rect_filled(table_rect, 4.0, Color32::from_rgb(20, 20, 20));
+                painter.rect_stroke(table_rect, 4.0, Stroke::new(1.0, Color32::from_gray(60)));
                 
                 // Get or create preview data
                 if let Some(preview) = state.node_data.get(&node.id) {
                     // Draw headers
                     if let Some(headers) = &preview.headers {
-                        let header_y = data_rect.min.y + 5.0;
-                        let col_width = data_rect.width() / headers.len().max(1) as f32;
-                        
-                        // Header background
-                        painter.rect_filled(
-                            Rect::from_min_size(
-                                data_rect.min,
-                                Vec2::new(data_rect.width(), 25.0)
-                            ),
-                            0.0,
-                            Color32::from_rgb(30, 30, 45)
+                        let header_height = 30.0;
+                        let header_rect = Rect::from_min_size(
+                            table_rect.min,
+                            Vec2::new(table_rect.width(), header_height)
                         );
                         
+                        // Header background
+                        painter.rect_filled(header_rect, 0.0, Color32::from_rgb(30, 30, 30));
+                        
+                        let col_width = table_rect.width() / headers.len().max(1) as f32;
+                        
                         for (i, header) in headers.iter().enumerate() {
+                            let text_pos = Pos2::new(
+                                table_rect.min.x + i as f32 * col_width + 10.0,
+                                table_rect.min.y + 8.0
+                            );
+                            
                             painter.text(
-                                Pos2::new(data_rect.min.x + i as f32 * col_width + 5.0, header_y),
+                                text_pos,
                                 egui::Align2::LEFT_TOP,
                                 header,
-                                FontId::proportional(12.0 * self.zoom),
+                                FontId::proportional(13.0 * self.zoom),
                                 Color32::from_gray(220),
                             );
+                            
+                            // Column separator
+                            if i > 0 {
+                                painter.line_segment(
+                                    [
+                                        Pos2::new(table_rect.min.x + i as f32 * col_width, table_rect.min.y),
+                                        Pos2::new(table_rect.min.x + i as f32 * col_width, table_rect.min.y + header_height),
+                                    ],
+                                    Stroke::new(1.0, Color32::from_gray(50)),
+                                );
+                            }
                         }
+                        
+                        // Header separator
+                        painter.line_segment(
+                            [
+                                Pos2::new(table_rect.min.x, table_rect.min.y + header_height),
+                                Pos2::new(table_rect.max.x, table_rect.min.y + header_height),
+                            ],
+                            Stroke::new(1.0, Color32::from_gray(70)),
+                        );
                         
                         // Draw rows
                         if let Some(rows) = &preview.rows {
-                            let row_height = 20.0 * self.zoom;
-                            let max_rows = ((data_rect.height() - 30.0) / row_height) as usize;
+                            let row_height = 25.0;
+                            let data_start_y = table_rect.min.y + header_height;
+                            let max_rows = ((table_rect.height() - header_height) / row_height) as usize;
                             
                             for (row_idx, row) in rows.iter().take(max_rows).enumerate() {
-                                let row_y = header_y + 25.0 + row_idx as f32 * row_height;
+                                let row_y = data_start_y + row_idx as f32 * row_height;
                                 
                                 // Alternating row colors
                                 if row_idx % 2 == 1 {
                                     painter.rect_filled(
                                         Rect::from_min_size(
-                                            Pos2::new(data_rect.min.x, row_y - 3.0),
-                                            Vec2::new(data_rect.width(), row_height)
+                                            Pos2::new(table_rect.min.x, row_y),
+                                            Vec2::new(table_rect.width(), row_height)
                                         ),
                                         0.0,
-                                        Color32::from_rgb(28, 28, 38)
+                                        Color32::from_rgb(25, 25, 25)
                                     );
                                 }
                                 
                                 for (col_idx, cell) in row.iter().enumerate() {
+                                    let text_pos = Pos2::new(
+                                        table_rect.min.x + col_idx as f32 * col_width + 10.0,
+                                        row_y + 5.0
+                                    );
+                                    
                                     painter.text(
-                                        Pos2::new(data_rect.min.x + col_idx as f32 * col_width + 5.0, row_y),
+                                        text_pos,
                                         egui::Align2::LEFT_TOP,
                                         cell,
-                                        FontId::proportional(11.0 * self.zoom),
+                                        FontId::proportional(12.0 * self.zoom),
                                         Color32::from_gray(180),
                                     );
+                                    
+                                    // Column separator
+                                    if col_idx > 0 {
+                                        painter.line_segment(
+                                            [
+                                                Pos2::new(table_rect.min.x + col_idx as f32 * col_width, row_y),
+                                                Pos2::new(table_rect.min.x + col_idx as f32 * col_width, row_y + row_height),
+                                            ],
+                                            Stroke::new(1.0, Color32::from_gray(40)),
+                                        );
+                                    }
                                 }
                             }
-                            
-                            // Show row count
-                            painter.text(
-                                data_rect.min + Vec2::new(5.0, data_rect.height() - 20.0),
-                                egui::Align2::LEFT_TOP,
-                                &format!("Showing {} of {} rows", rows.len().min(max_rows), rows.len()),
-                                FontId::proportional(10.0 * self.zoom),
-                                Color32::from_gray(120),
-                            );
                         }
                     }
                 } else {
                     // No data yet - show placeholder
                     painter.text(
-                        data_rect.center(),
+                        table_rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        "Loading data...",
-                        FontId::proportional(12.0 * self.zoom),
-                        Color32::from_gray(100),
+                        "Click Execute to run query",
+                        FontId::proportional(14.0 * self.zoom),
+                        Color32::from_gray(120),
                     );
                 }
                 
-                // Query area (only if selected)
-                if selected {
-                    // Query editing would go here if needed
-                }
+                // Pagination controls at bottom
+                let pagination_y = rect.max.y - 40.0;
+                let button_width = 80.0;
+                let button_height = 25.0;
+                
+                // Store button interactions for later processing
+                let mut clicked_previous = false;
+                let mut clicked_next = false;
+                let mut clicked_execute = false;
+                let mut clicked_create_plot = false;
+                let mut clicked_export_page = false;
+                let mut clicked_export_all = false;
+                
+                // Previous button
+                let prev_rect = Rect::from_min_size(
+                    Pos2::new(rect.min.x + 10.0, pagination_y),
+                    Vec2::new(button_width, button_height)
+                );
+                
+                let prev_enabled = state.node_data.get(&node.id)
+                    .map(|d| d.current_page > 0)
+                    .unwrap_or(false);
+                    
+                painter.rect_filled(
+                    prev_rect, 
+                    4.0, 
+                    if prev_enabled { Color32::from_rgb(40, 40, 40) } else { Color32::from_rgb(25, 25, 25) }
+                );
+                painter.rect_stroke(
+                    prev_rect, 
+                    4.0, 
+                    Stroke::new(1.0, if prev_enabled { Color32::from_gray(80) } else { Color32::from_gray(40) })
+                );
+                painter.text(
+                    prev_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Previous",
+                    FontId::proportional(12.0 * self.zoom),
+                    if prev_enabled { Color32::from_gray(200) } else { Color32::from_gray(100) },
+                );
+                
+                // Page info
+                let current_page = state.node_data.get(&node.id)
+                    .map(|d| d.current_page + 1)
+                    .unwrap_or(1);
+                let total_pages = state.node_data.get(&node.id)
+                    .and_then(|d| d.total_rows.map(|total| ((total as f32) / d.page_size as f32).ceil() as usize))
+                    .unwrap_or(1);
+                    
+                painter.text(
+                    Pos2::new(rect.min.x + 100.0, pagination_y + 5.0),
+                    egui::Align2::LEFT_TOP,
+                    &format!("Page {} of {}", current_page, total_pages.max(1)),
+                    FontId::proportional(12.0 * self.zoom),
+                    Color32::from_gray(180),
+                );
+                
+                // Next button
+                let next_rect = Rect::from_min_size(
+                    Pos2::new(rect.min.x + 200.0, pagination_y),
+                    Vec2::new(button_width, button_height)
+                );
+                
+                let next_enabled = state.node_data.get(&node.id)
+                    .map(|_d| current_page < total_pages)
+                    .unwrap_or(false);
+                    
+                painter.rect_filled(
+                    next_rect, 
+                    4.0, 
+                    if next_enabled { Color32::from_rgb(40, 40, 40) } else { Color32::from_rgb(25, 25, 25) }
+                );
+                painter.rect_stroke(
+                    next_rect, 
+                    4.0, 
+                    Stroke::new(1.0, if next_enabled { Color32::from_gray(80) } else { Color32::from_gray(40) })
+                );
+                painter.text(
+                    next_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Next",
+                    FontId::proportional(12.0 * self.zoom),
+                    if next_enabled { Color32::from_gray(200) } else { Color32::from_gray(100) },
+                );
+                
+                // Execute button (moved here from query area)
+                let execute_rect = Rect::from_min_size(
+                    Pos2::new(rect.center().x - 45.0, pagination_y),
+                    Vec2::new(90.0, button_height)
+                );
+                painter.rect_filled(execute_rect, 4.0, Color32::from_rgb(50, 100, 50));
+                painter.rect_stroke(execute_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(80, 150, 80)));
+                painter.text(
+                    execute_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Execute",
+                    FontId::proportional(12.0 * self.zoom),
+                    Color32::WHITE,
+                );
+                
+                // Create Plot button  
+                let create_plot_rect = Rect::from_min_size(
+                    Pos2::new(rect.max.x - 310.0, pagination_y),
+                    Vec2::new(100.0, button_height)
+                );
+                painter.rect_filled(create_plot_rect, 4.0, Color32::from_rgb(50, 50, 100));
+                painter.rect_stroke(create_plot_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(100, 100, 150)));
+                painter.text(
+                    create_plot_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Create Plot",
+                    FontId::proportional(12.0 * self.zoom),
+                    Color32::WHITE,
+                );
+                
+                // Export buttons on the right
+                let export_page_rect = Rect::from_min_size(
+                    Pos2::new(rect.max.x - 200.0, pagination_y),
+                    Vec2::new(90.0, button_height)
+                );
+                painter.rect_filled(export_page_rect, 4.0, Color32::from_rgb(40, 40, 40));
+                painter.rect_stroke(export_page_rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
+                painter.text(
+                    export_page_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Export Page",
+                    FontId::proportional(12.0 * self.zoom),
+                    Color32::from_gray(200),
+                );
+                
+                let export_all_rect = Rect::from_min_size(
+                    Pos2::new(rect.max.x - 100.0, pagination_y),
+                    Vec2::new(90.0, button_height)
+                );
+                painter.rect_filled(export_all_rect, 4.0, Color32::from_rgb(40, 40, 40));
+                painter.rect_stroke(export_all_rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
+                painter.text(
+                    export_all_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Export All",
+                    FontId::proportional(12.0 * self.zoom),
+                    Color32::from_gray(200),
+                );
+                
+                // Check for button clicks (we need to handle this in the interaction logic)
+                // For now, store the button rects for click detection later
+                Some(TableButtonRects {
+                    previous: prev_rect,
+                    next: next_rect,
+                    execute: execute_rect,
+                    create_plot: create_plot_rect,
+                    export_page: export_page_rect,
+                    export_all: export_all_rect,
+                })
             }
             CanvasNodeType::Plot { plot_type } => {
-                // Draw plot node
+                // Draw plot node with professional styling
                 painter.rect_filled(
                     rect,
-                    5.0,
-                    if selected { Color32::from_rgb(80, 60, 60) } else { Color32::from_rgb(60, 40, 40) },
+                    8.0,
+                    if selected { Color32::from_rgb(45, 45, 45) } else { Color32::from_rgb(35, 35, 35) },
                 );
                 painter.rect_stroke(
                     rect,
-                    5.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(250, 150, 100) } else { Color32::from_gray(100) }),
+                    8.0,
+                    Stroke::new(2.0, if selected { Color32::from_rgb(250, 150, 100) } else { Color32::from_gray(60) }),
                 );
                 
                 // Title bar
-                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 25.0));
-                painter.rect_filled(title_rect, 5.0, Color32::from_rgb(70, 50, 50));
+                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 40.0));
+                painter.rect_filled(
+                    title_rect, 
+                    egui::Rounding::same(8.0),
+                    Color32::from_rgb(50, 50, 50)
+                );
                 
                 painter.text(
                     title_rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    format!("📊 {}", plot_type),
-                    FontId::proportional(14.0 * self.zoom),
+                    format!("📊 {} Plot", plot_type),
+                    FontId::proportional(16.0 * self.zoom),
                     Color32::WHITE,
                 );
                 
-                // Plot preview area
+                // Plot area with margins for axes
+                let plot_margin = 50.0;
                 let plot_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(5.0, 30.0),
-                    Vec2::new(rect.width() - 10.0, rect.height() - 35.0),
+                    rect.min + Vec2::new(plot_margin, 50.0),
+                    Vec2::new(rect.width() - plot_margin - 20.0, rect.height() - 100.0),
                 );
-                painter.rect_filled(plot_rect, 2.0, Color32::from_rgb(40, 30, 30));
+                painter.rect_filled(plot_rect, 4.0, Color32::from_rgb(25, 25, 25));
+                painter.rect_stroke(plot_rect, 4.0, Stroke::new(1.0, Color32::from_gray(50)));
+                
+                // Draw axes
+                let axes_color = Color32::from_gray(150);
+                let axes_stroke = Stroke::new(2.0, axes_color);
+                
+                // Y-axis
+                painter.line_segment(
+                    [plot_rect.left_bottom(), plot_rect.left_top()],
+                    axes_stroke,
+                );
+                
+                // X-axis
+                painter.line_segment(
+                    [plot_rect.left_bottom(), plot_rect.right_bottom()],
+                    axes_stroke,
+                );
+                
+                // Axis labels
+                painter.text(
+                    Pos2::new(plot_rect.center().x, plot_rect.max.y + 20.0),
+                    egui::Align2::CENTER_TOP,
+                    "X Axis",
+                    FontId::proportional(12.0 * self.zoom),
+                    axes_color,
+                );
+                
+                // Y-axis label (rotated text would be ideal, but for now just place it)
+                painter.text(
+                    Pos2::new(plot_rect.min.x - 30.0, plot_rect.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    "Y",
+                    FontId::proportional(12.0 * self.zoom),
+                    axes_color,
+                );
                 
                 // Check if connected to a data source
                 let has_data = state.connections.iter().any(|conn| conn.to == node.id);
                 
                 if has_data {
-                    // Draw placeholder visualization
+                    // Draw plot visualization based on type
                     match plot_type.as_str() {
                         "Histogram" => {
-                            // Draw simple bars
-                            let bar_width = plot_rect.width() / 5.0;
-                            for i in 0..5 {
-                                let height = (i as f32 + 1.0) * 0.15 * plot_rect.height();
+                            // Draw histogram bars with spacing
+                            let num_bars = 8;
+                            let bar_width = plot_rect.width() / (num_bars as f32 * 1.5);
+                            let spacing = bar_width * 0.2;
+                            
+                            for i in 0..num_bars {
+                                let height = ((i as f32 + 1.0) / num_bars as f32) * plot_rect.height() * 0.8;
+                                let x = plot_rect.min.x + (i as f32 * (bar_width + spacing)) + spacing;
                                 let bar_rect = Rect::from_min_size(
-                                    plot_rect.min + Vec2::new(i as f32 * bar_width + 2.0, plot_rect.height() - height),
-                                    Vec2::new(bar_width - 4.0, height),
+                                    Pos2::new(x, plot_rect.max.y - height),
+                                    Vec2::new(bar_width, height),
                                 );
                                 painter.rect_filled(bar_rect, 2.0, Color32::from_rgb(100, 150, 200));
+                                painter.rect_stroke(bar_rect, 2.0, Stroke::new(1.0, Color32::from_rgb(150, 200, 250)));
+                            }
+                            
+                            // Draw grid lines
+                            for i in 1..5 {
+                                let y = plot_rect.min.y + (i as f32 / 5.0) * plot_rect.height();
+                                painter.line_segment(
+                                    [Pos2::new(plot_rect.min.x, y), Pos2::new(plot_rect.max.x, y)],
+                                    Stroke::new(1.0, Color32::from_gray(40)),
+                                );
                             }
                         }
-                        "Line" | "Scatter" => {
-                            // Draw simple line
-                            painter.line_segment(
-                                [
-                                    plot_rect.min + Vec2::new(10.0, plot_rect.height() - 10.0),
-                                    plot_rect.max - Vec2::new(10.0, 10.0),
-                                ],
-                                Stroke::new(2.0, Color32::from_rgb(100, 200, 150)),
-                            );
+                        "Line" => {
+                            // Draw a sample line chart
+                            let points = vec![
+                                Pos2::new(plot_rect.min.x + 20.0, plot_rect.max.y - 30.0),
+                                Pos2::new(plot_rect.min.x + plot_rect.width() * 0.25, plot_rect.min.y + plot_rect.height() * 0.3),
+                                Pos2::new(plot_rect.center().x, plot_rect.min.y + plot_rect.height() * 0.4),
+                                Pos2::new(plot_rect.min.x + plot_rect.width() * 0.75, plot_rect.min.y + plot_rect.height() * 0.2),
+                                Pos2::new(plot_rect.max.x - 20.0, plot_rect.min.y + plot_rect.height() * 0.5),
+                            ];
+                            
+                            // Draw line
+                            for i in 0..points.len() - 1 {
+                                painter.line_segment(
+                                    [points[i], points[i + 1]],
+                                    Stroke::new(2.0, Color32::from_rgb(100, 200, 150)),
+                                );
+                            }
+                            
+                            // Draw points
+                            for point in &points {
+                                painter.circle_filled(*point, 4.0, Color32::from_rgb(150, 250, 200));
+                                painter.circle_stroke(*point, 4.0, Stroke::new(1.0, Color32::from_rgb(100, 200, 150)));
+                            }
+                        }
+                        "Scatter" => {
+                            // Draw sample scatter plot
+                            let num_points = 20;
+                            for i in 0..num_points {
+                                let x = plot_rect.min.x + (i as f32 / num_points as f32) * plot_rect.width();
+                                let y = plot_rect.min.y + ((i * 7 % 11) as f32 / 11.0) * plot_rect.height();
+                                painter.circle_filled(Pos2::new(x, y), 3.0, Color32::from_rgb(200, 150, 100));
+                                painter.circle_stroke(Pos2::new(x, y), 3.0, Stroke::new(1.0, Color32::from_rgb(250, 200, 150)));
+                            }
                         }
                         _ => {
+                            // Generic plot placeholder
                             painter.text(
                                 plot_rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 "📊",
-                                FontId::proportional(32.0 * self.zoom),
-                                Color32::from_gray(150),
+                                FontId::proportional(48.0 * self.zoom),
+                                Color32::from_gray(100),
                             );
                         }
+                    }
+                    
+                    // Draw tick marks and labels
+                    for i in 0..5 {
+                        // X-axis ticks
+                        let x = plot_rect.min.x + (i as f32 / 4.0) * plot_rect.width();
+                        painter.line_segment(
+                            [Pos2::new(x, plot_rect.max.y), Pos2::new(x, plot_rect.max.y + 5.0)],
+                            axes_stroke,
+                        );
+                        painter.text(
+                            Pos2::new(x, plot_rect.max.y + 8.0),
+                            egui::Align2::CENTER_TOP,
+                            &format!("{}", i * 25),
+                            FontId::proportional(10.0 * self.zoom),
+                            axes_color,
+                        );
+                        
+                        // Y-axis ticks
+                        let y = plot_rect.max.y - (i as f32 / 4.0) * plot_rect.height();
+                        painter.line_segment(
+                            [Pos2::new(plot_rect.min.x - 5.0, y), Pos2::new(plot_rect.min.x, y)],
+                            axes_stroke,
+                        );
+                        painter.text(
+                            Pos2::new(plot_rect.min.x - 10.0, y),
+                            egui::Align2::RIGHT_CENTER,
+                            &format!("{}", i * 25),
+                            FontId::proportional(10.0 * self.zoom),
+                            axes_color,
+                        );
                     }
                 } else {
                     painter.text(
                         plot_rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        "No data",
-                        FontId::proportional(12.0 * self.zoom),
-                        Color32::from_gray(150),
+                        "Connect to a data source",
+                        FontId::proportional(14.0 * self.zoom),
+                        Color32::from_gray(120),
                     );
                 }
+                None
             }
             CanvasNodeType::Note { content } => {
                 // Draw note node
@@ -1069,6 +1392,7 @@ impl CanvasPanel {
                     FontId::proportional(12.0 * self.zoom),
                     Color32::WHITE,
                 );
+                None
             }
             CanvasNodeType::Shape { shape_type } => {
                 // Draw shapes
@@ -1106,6 +1430,7 @@ impl CanvasPanel {
                         Stroke::new(1.0, Color32::from_rgb(100, 150, 250)),
                     );
                 }
+                None
             }
         }
     }
@@ -1270,5 +1595,57 @@ impl CanvasPanel {
                 }
             }
         }
+    }
+
+    fn show_plot_creation_menu(&mut self, ui: &mut Ui, state: &mut AppState, node_id: NodeId) {
+        ui.label("Create Plot:");
+        
+        // Common plot types
+        if ui.button("📊 Histogram").clicked() {
+            self.create_plot_from_table(state, node_id, "Histogram");
+            ui.close_menu();
+        }
+        if ui.button("📈 Line Plot").clicked() {
+            self.create_plot_from_table(state, node_id, "Line");
+            ui.close_menu();
+        }
+        if ui.button("⚪ Scatter Plot").clicked() {
+            self.create_plot_from_table(state, node_id, "Scatter");
+            ui.close_menu();
+        }
+        if ui.button("📊 Bar Chart").clicked() {
+            self.create_plot_from_table(state, node_id, "Bar");
+            ui.close_menu();
+        }
+        
+        ui.separator();
+        
+        // More plot types
+        ui.menu_button("More Plots", |ui| {
+            if ui.button("Box Plot").clicked() {
+                self.create_plot_from_table(state, node_id, "BoxPlot");
+                ui.close_menu();
+            }
+            if ui.button("Violin Plot").clicked() {
+                self.create_plot_from_table(state, node_id, "Violin");
+                ui.close_menu();
+            }
+            if ui.button("Heatmap").clicked() {
+                self.create_plot_from_table(state, node_id, "Heatmap");
+                ui.close_menu();
+            }
+            if ui.button("Correlation Matrix").clicked() {
+                self.create_plot_from_table(state, node_id, "Correlation");
+                ui.close_menu();
+            }
+            if ui.button("Time Series").clicked() {
+                self.create_plot_from_table(state, node_id, "TimeSeries");
+                ui.close_menu();
+            }
+            if ui.button("Radar Chart").clicked() {
+                self.create_plot_from_table(state, node_id, "Radar");
+                ui.close_menu();
+            }
+        });
     }
 }

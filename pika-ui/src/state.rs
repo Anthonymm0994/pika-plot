@@ -126,6 +126,21 @@ pub struct AppState {
 pub struct NodeDataPreview {
     pub headers: Option<Vec<String>>,
     pub rows: Option<Vec<Vec<String>>>,
+    pub total_rows: Option<usize>,
+    pub current_page: usize,
+    pub page_size: usize,
+}
+
+impl Default for NodeDataPreview {
+    fn default() -> Self {
+        Self {
+            headers: None,
+            rows: None,
+            total_rows: None,
+            current_page: 0,
+            page_size: 25,
+        }
+    }
 }
 
 impl AppState {
@@ -193,6 +208,9 @@ impl AppState {
                     vec!["2".to_string(), "More Data".to_string(), "200".to_string()],
                     vec!["3".to_string(), "Another Row".to_string(), "300".to_string()],
                 ]),
+                total_rows: Some(3),
+                current_page: 0,
+                page_size: 25,
             };
             self.node_data.insert(node_id, preview);
             
@@ -205,21 +223,77 @@ impl AppState {
     
     /// Execute query for a table node
     pub fn execute_node_query(&mut self, node_id: NodeId) {
+        // Get the query and table name
         if let Some(query) = self.node_queries.get(&node_id).cloned() {
-            // For now, just update the preview with mock results
-            // In real implementation, this would execute the query via DuckDB
-            let preview = NodeDataPreview {
-                headers: Some(vec!["id".to_string(), "result".to_string(), "value".to_string()]),
-                rows: Some(vec![
-                    vec!["Q1".to_string(), format!("Query: {}", query), "42".to_string()],
-                    vec!["Q2".to_string(), "Result Row 2".to_string(), "84".to_string()],
-                ]),
-            };
-            self.node_data.insert(node_id, preview);
-            
-            // Update any connected plot nodes
-            self.update_connected_plots(node_id);
+            // Execute full query for plots
+            self.execute_full_query(node_id, query);
+        } else if let Some(canvas_node) = self.get_canvas_node(node_id) {
+            if let CanvasNodeType::Table { table_info } = &canvas_node.node_type {
+                let default_query = format!("SELECT * FROM '{}'", table_info.name);
+                self.execute_full_query(node_id, default_query);
+            }
         }
+    }
+    
+    /// Execute query with pagination for table display
+    pub fn execute_node_query_with_pagination(&mut self, node_id: NodeId) {
+        // Get the query and table name
+        let (query, _table_name) = if let Some(query) = self.node_queries.get(&node_id).cloned() {
+            let table_name = self.get_canvas_node(node_id)
+                .and_then(|n| match &n.node_type {
+                    CanvasNodeType::Table { table_info } => Some(table_info.name.clone()),
+                    _ => None
+                })
+                .unwrap_or_default();
+            (query, table_name)
+        } else if let Some(canvas_node) = self.get_canvas_node(node_id) {
+            if let CanvasNodeType::Table { table_info } = &canvas_node.node_type {
+                (format!("SELECT * FROM '{}'", table_info.name), table_info.name.clone())
+            } else {
+                return;
+            }
+        } else {
+            return;
+        };
+        
+        // Get current pagination state
+        let (page, page_size) = self.node_data.get(&node_id)
+            .map(|d| (d.current_page, d.page_size))
+            .unwrap_or((0, 25));
+        
+        // First, get total count (simulate)
+        let total_rows = 200; // TODO: Execute COUNT query
+        
+        // Add LIMIT and OFFSET for table display
+        let _paginated_query = format!("{} LIMIT {} OFFSET {}", query, page_size, page * page_size);
+        
+        // TODO: Execute the paginated query here
+        // For now, generate mock data
+        let preview = NodeDataPreview {
+            headers: Some(vec!["id".to_string(), "name".to_string(), "value".to_string()]),
+            rows: Some((0..page_size.min(total_rows - page * page_size)).map(|i| {
+                let row_num = page * page_size + i + 1;
+                vec![
+                    row_num.to_string(),
+                    format!("Row {}", row_num),
+                    (row_num * 100).to_string(),
+                ]
+            }).collect()),
+            total_rows: Some(total_rows),
+            current_page: page,
+            page_size,
+        };
+        
+        self.node_data.insert(node_id, preview);
+        
+        // Also execute full query for any connected plots
+        self.execute_full_query(node_id, query);
+    }
+    
+    /// Execute full query without pagination (for plots)
+    fn execute_full_query(&mut self, node_id: NodeId, _query: String) {
+        // This would execute the full query and update connected plots
+        self.update_connected_plots(node_id);
     }
     
     /// Update plots connected to a data source
