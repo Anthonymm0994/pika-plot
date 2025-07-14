@@ -284,11 +284,26 @@ impl Default for EventBus {
     }
 }
 
-/// Data passed to plot rendering callbacks
+/// Metadata for plot rendering
+#[derive(Debug, Clone)]
+pub struct PlotMetadata {
+    pub title: Option<String>,
+    pub x_axis_label: Option<String>,
+    pub y_axis_label: Option<String>,
+    pub columns: Vec<String>,
+    pub row_count: usize,
+    pub data_types: Vec<String>,
+}
+
+/// Data ready for plot rendering
 #[derive(Debug, Clone)]
 pub struct PlotRenderData {
-    pub data: Arc<duckdb::arrow::record_batch::RecordBatch>,
-    pub config: PlotConfig,
+    pub query_id: String,
+    pub plot_type: String,
+    pub config: serde_json::Value,
+    // Using generic data structure for now - will restore duckdb once conflicts resolved
+    pub data: Arc<Vec<Vec<serde_json::Value>>>,
+    pub metadata: PlotMetadata,
 }
 
 #[cfg(test)]

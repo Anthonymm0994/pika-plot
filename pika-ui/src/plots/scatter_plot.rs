@@ -3,6 +3,7 @@ use egui_plot::{Plot, PlotPoints, Points, Legend, MarkerShape as EguiMarkerShape
 use arrow::record_batch::RecordBatch;
 use pika_core::plots::{PlotConfig, PlotDataConfig, MarkerShape};
 use pika_engine::plot::{extract_xy_points, extract_string_values};
+use crate::theme::{PlotTheme, get_theme_mode};
 use std::collections::BTreeMap;
 
 pub struct ScatterPlot {
@@ -41,82 +42,96 @@ impl ScatterPlot {
     }
     
     pub fn render(&self, ui: &mut Ui, data: &RecordBatch) {
+        // Get theme-aware colors
+        let theme_mode = get_theme_mode(ui.ctx());
+        let plot_theme = PlotTheme::for_mode(theme_mode);
+        
         // Extract points
         let points_result = extract_xy_points(data, &self.x_column, &self.y_column);
         
         match points_result {
             Ok(points) => {
+                // Convert to the format expected by PlotPoints
+                let plot_points: Vec<[f64; 2]> = points.iter().map(|(x, y)| [*x, *y]).collect();
+                
                 // Extract categories if color column is specified
                 let (categories, category_map) = if let Some(color_col) = &self.color_column {
-                    if let Some(cat_array) = data.column_by_name(color_col) {
-                        if let Ok(cats) = extract_string_values(cat_array) {
-                            // Create color map
-                            let mut cat_map = BTreeMap::new();
-                            let unique_cats: Vec<String> = cats.iter()
-                                .cloned()
-                                .collect::<std::collections::HashSet<_>>()
-                                .into_iter()
-                                .collect();
-                            
-                            for (i, cat) in unique_cats.iter().enumerate() {
-                                cat_map.insert(cat.clone(), categorical_color(i));
+                    if let Some(color_array) = data.column_by_name(color_col) {
+                        match extract_string_values(color_array) {
+                            Ok(values) => {
+                                let mut unique_categories = BTreeMap::new();
+                                let mut category_index = 0;
+                                
+                                for value in &values {
+                                    if !unique_categories.contains_key(value) {
+                                        unique_categories.insert(value.clone(), category_index);
+                                        category_index += 1;
+                                    }
+                                }
+                                
+                                (Some(values), unique_categories)
                             }
-                            
-                            (Some(cats), Some(cat_map))
-                        } else {
-                            (None, None)
+                            Err(_) => (None, BTreeMap::new()),
                         }
                     } else {
-                        (None, None)
+                        (None, BTreeMap::new())
                     }
                 } else {
-                    (None, None)
+                    (None, BTreeMap::new())
                 };
                 
-                let plot = Plot::new("scatter_plot")
+                // Create plot
+                let mut plot = Plot::new("scatter_plot")
                     .legend(Legend::default())
-                    .data_aspect(1.0)
                     .show_grid(self.show_grid)
-                    .auto_bounds(egui::Vec2b::new(true, true));
+                    .show_axes([true, true]);
+                
+                // Apply theme colors to plot
+                if theme_mode == crate::theme::ThemeMode::Dark {
+                    plot = plot.show_background(false);
+                }
                 
                 plot.show(ui, |plot_ui| {
-                    if let (Some(cats), Some(cat_map)) = (&categories, &category_map) {
-                        // Plot points grouped by category
-                        for (category, &color) in cat_map {
-                            let category_points: Vec<[f64; 2]> = points.iter()
-                                .enumerate()
-                                .filter(|(i, _)| cats.get(*i).map(|c: &String| c == category).unwrap_or(false))
-                                .map(|(_, &(x, y))| [x, y])
-                                .collect();
-                            
-                            if !category_points.is_empty() {
-                                let points = Points::new(PlotPoints::new(category_points))
-                                    .color(color)
+                    if let Some(categories) = categories {
+                        // Group points by category
+                        let mut category_points: BTreeMap<String, Vec<[f64; 2]>> = BTreeMap::new();
+                        
+                        for (i, point) in plot_points.iter().enumerate() {
+                            if let Some(category) = categories.get(i) {
+                                category_points.entry(category.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(*point);
+                            }
+                        }
+                        
+                        // Plot each category with its own color
+                        for (category, cat_points) in category_points {
+                            if let Some(&color_index) = category_map.get(&category) {
+                                let color = plot_theme.categorical_color(color_index);
+                                let points_obj = PlotPoints::new(cat_points);
+                                let points = Points::new(points_obj)
                                     .radius(self.point_radius)
+                                    .color(color)
                                     .shape(convert_marker_shape(self.marker_shape))
                                     .name(category);
-                                
                                 plot_ui.points(points);
                             }
                         }
                     } else {
-                        // No categories, plot all points with same color
-                        let plot_points: Vec<[f64; 2]> = points.iter()
-                            .map(|&(x, y)| [x, y])
-                            .collect();
-                        
-                        let points = Points::new(PlotPoints::new(plot_points))
-                            .color(Color32::from_rgb(31, 119, 180))
+                        // Single series with theme-appropriate color
+                        let color = plot_theme.categorical_color(0);
+                        let points_obj = PlotPoints::new(plot_points);
+                        let points = Points::new(points_obj)
                             .radius(self.point_radius)
+                            .color(color)
                             .shape(convert_marker_shape(self.marker_shape))
-                            .name(&format!("{} vs {}", self.y_column, self.x_column));
-                        
+                            .name(format!("{} vs {}", self.x_column, self.y_column));
                         plot_ui.points(points);
                     }
                 });
             }
             Err(e) => {
-                ui.colored_label(Color32::RED, format!("Error: {}", e));
+                ui.colored_label(Color32::RED, format!("Error rendering scatter plot: {}", e));
             }
         }
     }
@@ -126,26 +141,9 @@ fn convert_marker_shape(shape: MarkerShape) -> EguiMarkerShape {
     match shape {
         MarkerShape::Circle => EguiMarkerShape::Circle,
         MarkerShape::Square => EguiMarkerShape::Square,
-        MarkerShape::Triangle => EguiMarkerShape::Up,
         MarkerShape::Diamond => EguiMarkerShape::Diamond,
+        MarkerShape::Triangle => EguiMarkerShape::Up,
         MarkerShape::Cross => EguiMarkerShape::Cross,
         MarkerShape::Plus => EguiMarkerShape::Plus,
     }
-}
-
-fn categorical_color(index: usize) -> Color32 {
-    const COLORS: &[Color32] = &[
-        Color32::from_rgb(31, 119, 180),   // Blue
-        Color32::from_rgb(255, 127, 14),   // Orange
-        Color32::from_rgb(44, 160, 44),    // Green
-        Color32::from_rgb(214, 39, 40),    // Red
-        Color32::from_rgb(148, 103, 189),  // Purple
-        Color32::from_rgb(140, 86, 75),    // Brown
-        Color32::from_rgb(227, 119, 194),  // Pink
-        Color32::from_rgb(127, 127, 127),  // Gray
-        Color32::from_rgb(188, 189, 34),   // Olive
-        Color32::from_rgb(23, 190, 207),   // Cyan
-    ];
-    
-    COLORS[index % COLORS.len()]
 } 

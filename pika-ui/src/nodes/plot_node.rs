@@ -154,19 +154,18 @@ impl Node for PlotNode {
                     self.config = config.clone();
                     Ok(())
                 } else {
-                    Err(PikaError::InvalidDataType {
-                        expected: "PlotConfig".to_string(),
-                        found: "Unknown".to_string(),
-                    })
+                    Err(PikaError::Validation(
+                        format!("Invalid data type for port {}: expected table data", port_id)
+                    ))
                 }
             }
-            _ => Err(PikaError::InvalidPort(format!("Unknown port: {}", port_id))),
+            _ => Err(PikaError::Validation(format!("Unknown port: {}", port_id))),
         }
     }
     
     fn get_output(&self, port_id: &str) -> Result<Option<Arc<dyn Any + Send + Sync>>> {
         // Plot nodes typically don't have outputs
-        Err(PikaError::InvalidPort(format!("Unknown output port: {}", port_id)))
+        Err(PikaError::Validation(format!("Unknown output port: {}", port_id)))
     }
     
     fn is_ready(&self) -> bool {
@@ -177,7 +176,7 @@ impl Node for PlotNode {
         // Plot execution would happen here
         // For now, just validate we have data
         if self.data.is_none() {
-            return Err(PikaError::MissingField("data".to_string()));
+            return Err(PikaError::Validation("Missing data field".to_string()));
         }
         Ok(())
     }

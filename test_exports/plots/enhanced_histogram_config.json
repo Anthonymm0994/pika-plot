@@ -1,0 +1,47 @@
+{
+  "plot_type": "Histogram",
+  "title": "Sales Distribution Analysis - Interactive Histogram",
+  "x_label": "Sales Amount ($)",
+  "y_label": "Frequency (Count)",
+  "width": 900,
+  "height": 600,
+  "specific": {
+    "type": "HistogramConfig",
+    "column": "sales",
+    "num_bins": 25,
+    "bin_strategy": "FreedmanDiaconis",
+    "show_density": true,
+    "show_normal": true
+  },
+  "interactive_features": {
+    "zoom_enabled": true,
+    "pan_enabled": true,
+    "legend_visible": true,
+    "legend_position": "top_right",
+    "grid_visible": true,
+    "grid_style": "solid",
+    "axis_labels_visible": true,
+    "axis_labels_font_size": 12,
+    "title_font_size": 16,
+    "tooltip_enabled": true,
+    "tooltip_format": "Range: ${x_min:.2f} - ${x_max:.2f}, Count: {y}",
+    "statistics_overlay": true,
+    "bin_highlighting": true
+  },
+  "styling": {
+    "background_color": "#fafafa",
+    "grid_color": "#d0d0d0",
+    "axis_color": "#444444",
+    "text_color": "#444444",
+    "bar_color": "#2E86AB",
+    "bar_stroke": "#1B5E7D",
+    "density_curve_color": "#F24236",
+    "normal_curve_color": "#F6AE2D"
+  },
+  "statistics": {
+    "show_mean": true,
+    "show_median": true,
+    "show_std_dev": true,
+    "show_quartiles": true
+  }
+} 

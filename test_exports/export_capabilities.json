@@ -1,0 +1,54 @@
+{
+  "export_capabilities": {
+    "data_formats": [
+      {
+        "format": "CSV",
+        "description": "Comma-separated values",
+        "file": "sales_data.csv",
+        "features": ["headers", "custom_delimiters", "encoding_options"]
+      },
+      {
+        "format": "JSON", 
+        "description": "JavaScript Object Notation",
+        "file": "sales_data_export.json",
+        "features": ["structured_data", "nested_objects", "arrays"]
+      },
+      {
+        "format": "TSV",
+        "description": "Tab-separated values", 
+        "file": "sales_data_export.tsv",
+        "features": ["tab_delimited", "compatible_with_excel"]
+      },
+      {
+        "format": "Parquet",
+        "description": "Columnar storage format",
+        "file": "sales_data.parquet.metadata",
+        "features": ["compression", "schema_preservation", "big_data_optimized"]
+      }
+    ],
+    "plot_exports": [
+      {
+        "format": "PNG",
+        "description": "Portable Network Graphics",
+        "status": "framework_ready",
+        "features": ["high_quality", "web_compatible", "transparent_background"]
+      },
+      {
+        "format": "SVG", 
+        "description": "Scalable Vector Graphics",
+        "status": "framework_ready",
+        "features": ["vector_based", "scalable", "publication_quality"]
+      }
+    ]
+  },
+  "interactive_features": {
+    "zoom_pan": "Smooth navigation with mouse/touch",
+    "legends": "Configurable positioning and styling",
+    "tooltips": "Rich data display with custom formatting",
+    "grid_system": "Multiple styles (solid, dashed, dotted)",
+    "axis_labels": "Professional typography with font control",
+    "selection_tools": "Brush selection and multi-select",
+    "range_selectors": "Time-based navigation controls",
+    "crosshairs": "Precise data point identification"
+  }
+}

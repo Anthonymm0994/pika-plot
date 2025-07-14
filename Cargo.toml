@@ -1,12 +1,12 @@
 [workspace]
-resolver = "2"
 members = [
     "pika-core",
     "pika-engine", 
     "pika-ui",
-    "pika-app",
     "pika-cli",
+    "pika-app"
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
@@ -17,76 +17,94 @@ license = "MIT"
 repository = "https://github.com/user/pika-plot"
 
 [workspace.dependencies]
-# Core dependencies
+# Core data processing - temporarily disabled due to arrow/chrono conflicts
+# Will re-enable with alternative approach
+# duckdb = "0.9"
+# polars = { version = "0.33", features = ["lazy", "csv", "json"] }
+
+# Core utilities - stable versions
 tokio = { version = "1.35", features = ["full"] }
-async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ron = "0.8"
-thiserror = "1.0"
 anyhow = "1.0"
+thiserror = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = "0.3"
 uuid = { version = "1.6", features = ["v4", "serde"] }
-
-# Data processing
-# We use duckdb's arrow re-export to avoid version conflicts
-duckdb = { version = "1.3", features = ["bundled"] }
-chrono = { version = "0.4.41", features = ["serde"] }
-
-# UI dependencies  
-egui = "0.28"
-eframe = { version = "0.28", default-features = false, features = ["wgpu", "accesskit"] }
-egui-wgpu = "0.28"
-wgpu = "0.20"
-bytemuck = { version = "1.14", features = ["derive"] }
-
-# Plotting
-egui_plot = "0.28"
-
-# Graph algorithms
-petgraph = "0.6"
-
-# Spatial indexing
-rstar = "0.11"
-
-# Memory pooling
-crossbeam = "0.8"
-
-# Async/concurrency
-flume = "0.11"
-dashmap = "5.5"
+chrono = { version = "0.4.30", features = ["serde"] }
+rayon = "1.8"
 parking_lot = "0.12"
+flume = "0.11"
+dunce = "1.0"
+async-trait = "0.1"
+futures = "0.3"
+regex = "1.10"
+once_cell = "1.19"
 
-# Caching
-moka = { version = "0.12", features = ["future", "sync"] }
+# Basic CSV processing (alternative to polars)
+csv = "1.3"
 
-# Utilities
-num_cpus = "1.16"
-humansize = "2.1"
+# File dialogs - needed for CSV import
 rfd = "0.14"
 
-# File formats
-csv = "1.3"
-png = "0.17"
-arrow = "55.0"
+# UI framework - stable versions
+egui = "0.28"
+egui_extras = { version = "0.28", features = ["all_loaders"] }
+egui-winit = "0.28"
+egui-wgpu = "0.28"
+eframe = "0.28"
+egui_plot = "0.28"
+winit = "0.29"
+image = { version = "0.24", features = ["png", "jpeg"] }
 
-# Testing
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.4"
+# Basic visualization
+plotters = { version = "0.3", features = ["bitmap_backend", "svg_backend"] }
+resvg = "0.37"
+tiny-skia = "0.11"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+indicatif = "0.17"
+comfy-table = "7.1"
+num_cpus = "1.16"
+
+# File system and I/O
+notify = "6.1"
+walkdir = "2.5"
+tempfile = "3.8"
+
+# Basic GPU support for canvas
+bytemuck = "1.14"
+wgpu = "0.19"
+
+# Math and data structures
+ndarray = "0.15"
+petgraph = "0.6"
+
+# WASM support (for potential future web deployment)
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
 
 # Platform-specific dependencies
 windows = { version = "0.52", features = [
     "Win32_System_SystemInformation", 
     "Win32_System_Memory",
-    "Win32_Graphics_Dxgi",
 ]}
 
-[profile.dev]
-opt-level = 1
+# Testing
+criterion = "0.5"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort"
 strip = true
+
+[profile.dev]
+opt-level = 1
+debug = true
+overflow-checks = true

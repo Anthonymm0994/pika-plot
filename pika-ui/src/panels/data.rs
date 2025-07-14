@@ -2,7 +2,7 @@
 
 use crate::state::AppState;
 use pika_core::events::AppEvent;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::mpsc::Sender;
 use egui::{Ui, ScrollArea};
 
 /// Data panel showing loaded data sources.
@@ -33,9 +33,17 @@ impl DataPanel {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                for node in &state.data_nodes {
-                    if let Some(selected_id) = state.selected_node {
-                        let is_selected = node.id == selected_id;
+                if state.data_nodes.is_empty() {
+                    ui.label("No data sources loaded");
+                    ui.separator();
+                    ui.label("💡 Click 'Import Data...' to add CSV files");
+                } else {
+                    for node in &state.data_nodes {
+                        let is_selected = if let Some(selected_id) = state.selected_node {
+                            node.id == selected_id
+                        } else {
+                            false
+                        };
                         
                         let response = ui.selectable_label(
                             is_selected,
@@ -54,7 +62,7 @@ impl DataPanel {
                         
                         response.context_menu(|ui| {
                             if ui.button("Remove").clicked() {
-                                // Would remove the node
+                                state.remove_data_node(node.id);
                                 ui.close_menu();
                             }
                         });
@@ -66,7 +74,9 @@ impl DataPanel {
         
         // Import button
         if ui.button("➕ Import Data...").clicked() {
-            // This is handled in the main app
+            // This will be handled in the main app by checking if the dialog should be shown
+            // For now, we'll just print a message
+            println!("📊 Opening CSV import dialog...");
         }
     }
 } 

@@ -1,0 +1,15 @@
+{
+  "plot_type": "Violin",
+  "title": "Distribution Analysis - Violin Plot",
+  "x_label": "Category",
+  "y_label": "Value",
+  "width": 800,
+  "height": 600,
+  "specific": {
+    "type": "ViolinConfig",
+    "category_column": "category",
+    "value_column": "value",
+    "show_box": true,
+    "bandwidth": 1.0
+  }
+} 

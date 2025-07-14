@@ -1,0 +1,16 @@
+id,name,age,salary,department,start_date,active,notes
+1,John Doe,30,50000.00,Engineering,2020-01-15,true,Good performer
+2,Jane Smith,,45000.00,Marketing,2019-03-22,true,
+3,Bob Johnson,35,,Sales,2021-07-10,false,On leave
+4,,28,40000.00,Engineering,,true,New hire
+5,Alice Brown,42,60000.00,,2018-11-05,true,Senior developer
+6,Charlie Wilson,31,52000.00,Marketing,2020-09-12,,Remote worker
+7,Diana Lee,,48000.00,Sales,2019-12-01,true,Top performer
+8,Eve Davis,29,,Engineering,2021-02-28,false,
+9,Frank Miller,38,55000.00,,2020-06-15,true,Team lead
+10,,33,41000.00,Marketing,2021-04-20,true,Junior analyst
+11,Grace Chen,26,39000.00,Sales,,false,Probation period
+12,Henry Taylor,44,,Engineering,2018-08-10,true,Senior engineer
+13,Ivy Wilson,31,47000.00,Marketing,2019-10-30,,Part-time
+14,Jack Brown,,51000.00,,2020-12-05,true,Consultant
+15,Kate Johnson,27,38000.00,Sales,2021-06-18,false, 

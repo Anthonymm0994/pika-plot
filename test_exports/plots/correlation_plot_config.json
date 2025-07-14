@@ -1,0 +1,15 @@
+{
+  "plot_type": "Correlation",
+  "title": "Correlation Analysis Matrix",
+  "x_label": "Variables",
+  "y_label": "Variables",
+  "width": 600,
+  "height": 600,
+  "specific": {
+    "type": "CorrelationConfig",
+    "columns": ["sales", "quantity", "price", "rating"],
+    "method": "Pearson",
+    "show_values": true,
+    "color_scale": "Diverging"
+  }
+} 

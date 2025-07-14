@@ -286,8 +286,16 @@ mod tests {
     #[test]
     fn test_shortcut_text_formatting() {
         let manager = ShortcutManager::new();
-        let shortcut_text = manager.get_shortcut_text(ShortcutAction::ImportData);
-        assert_eq!(shortcut_text, Some("Ctrl+O".to_string()));
+        
+        // Test that shortcuts are formatted correctly
+        let open_text = manager.get_shortcut_text(ShortcutAction::ImportData);
+        assert_eq!(open_text, Some("Ctrl+O".to_string())); // Full shortcut format
+        
+        let save_text = manager.get_shortcut_text(ShortcutAction::SaveWorkspace);
+        assert_eq!(save_text, Some("Ctrl+S".to_string()));
+        
+        let scatter_text = manager.get_shortcut_text(ShortcutAction::CreateScatterPlot);
+        assert_eq!(scatter_text, Some("Ctrl+1".to_string())); // This has a shortcut: Ctrl+1
     }
     
     #[test]

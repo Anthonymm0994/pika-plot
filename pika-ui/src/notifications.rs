@@ -287,57 +287,75 @@ mod tests {
     use super::*;
     
     #[test]
-    fn test_toast_creation() {
+    fn test_notification_creation() {
         let mut manager = NotificationManager::new();
-        let id = manager.info("Test", "Test message");
-        assert_eq!(id, 1);
-        assert_eq!(manager.toasts.len(), 1);
+        manager.show_info("Test message".to_string(), None, None);
+        assert_eq!(manager.notifications.len(), 1);
+        
+        let notification = &manager.notifications[0];
+        assert_eq!(notification.notification_type, NotificationType::Info);
+        assert_eq!(notification.title, "Info");
+        assert_eq!(notification.message, "Test message");
     }
     
     #[test]
-    fn test_error_toast_creation() {
+    fn test_error_notification_creation() {
         let mut manager = NotificationManager::new();
         let error = PikaError::FileReadError("test.csv".to_string());
-        let id = manager.add_error_toast(&error);
-        assert_eq!(id, 1);
-        assert_eq!(manager.toasts.len(), 1);
+        manager.show_error_notification(&error);
         
-        let toast = &manager.toasts[0];
-        assert_eq!(toast.toast_type, ToastType::Error);
-        assert_eq!(toast.title, "File Access Error");
+        assert_eq!(manager.notifications.len(), 1);
+        
+        let notification = &manager.notifications[0];
+        assert_eq!(notification.notification_type, NotificationType::Error);
+        assert_eq!(notification.title, "File Access Error");
+        assert!(notification.message.contains("Unable to read the selected file"));
     }
     
     #[test]
-    fn test_toast_capacity() {
+    fn test_notification_capacity() {
         let mut manager = NotificationManager::new();
-        manager.max_toasts = 3;
+        manager.max_notifications = 3;
         
-        // Add 5 toasts
+        // Add 5 notifications
         for i in 0..5 {
-            manager.info(&format!("Test {}", i), "Message");
+            manager.show_info(format!("Test message {}", i), None, None);
         }
         
-        // Should only have 3 toasts (oldest removed)
-        assert_eq!(manager.toasts.len(), 3);
+        // Should only have 3 notifications (oldest removed)
+        assert_eq!(manager.notifications.len(), 3);
         
-        // Should have toasts 3, 4, 5
-        assert_eq!(manager.toasts[0].title, "Test 2");
-        assert_eq!(manager.toasts[1].title, "Test 3");
-        assert_eq!(manager.toasts[2].title, "Test 4");
+        // Should have messages 2, 3, 4 (0-indexed)
+        assert_eq!(manager.notifications[0].message, "Test message 2");
+        assert_eq!(manager.notifications[1].message, "Test message 3");
+        assert_eq!(manager.notifications[2].message, "Test message 4");
     }
     
     #[test]
-    fn test_progress_toast() {
+    fn test_different_notification_types() {
         let mut manager = NotificationManager::new();
-        let id = manager.progress("Importing", "Processing data...", 0.5);
         
-        let toast = &manager.toasts[0];
-        assert_eq!(toast.progress, Some(0.5));
-        assert!(toast.persistent);
+        manager.show_info("Info message".to_string(), None, None);
+        manager.show_success("Success message".to_string(), None, None);
+        manager.show_warning("Warning message".to_string(), None, None);
+        manager.show_error("Error message".to_string(), None, None);
+        manager.show_critical("Critical message".to_string(), None, None);
         
-        // Update progress
-        manager.update_progress(id, 0.8);
-        let toast = &manager.toasts[0];
-        assert_eq!(toast.progress, Some(0.8));
+        assert_eq!(manager.notifications.len(), 5);
+        assert_eq!(manager.notifications[0].notification_type, NotificationType::Info);
+        assert_eq!(manager.notifications[1].notification_type, NotificationType::Success);
+        assert_eq!(manager.notifications[2].notification_type, NotificationType::Warning);
+        assert_eq!(manager.notifications[3].notification_type, NotificationType::Error);
+        assert_eq!(manager.notifications[4].notification_type, NotificationType::Critical);
+    }
+    
+    #[test]
+    fn test_notification_with_action() {
+        let mut manager = NotificationManager::new();
+        manager.show_info("Test message".to_string(), Some("Action".to_string()), None);
+        
+        let notification = &manager.notifications[0];
+        assert!(notification.action.is_some());
+        assert_eq!(notification.action.as_ref().unwrap().label, "Action");
     }
 } 

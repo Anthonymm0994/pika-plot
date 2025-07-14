@@ -9,36 +9,34 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Cache for query results and computed data
+/// Query result cache with memory pressure monitoring
 pub struct QueryCache {
     // cache: Cache<String, Arc<QueryResult>>,  // TODO: Use moka cache
     cache: HashMap<String, Arc<QueryResult>>,
 }
 
 impl QueryCache {
-    /// Create a new cache manager with memory limit.
+    /// Create a new cache with memory limit
     pub fn new_with_limit(_memory_limit: u64) -> Self {
         QueryCache {
             cache: HashMap::new(),
         }
     }
     
-    /// Get the memory pressure level.
+    /// Get memory pressure level (0-100)
     pub fn pressure_level(&self) -> u8 {
-        0  // TODO: Implement actual pressure monitoring
+        // TODO: Implement actual memory pressure calculation
+        0
     }
     
-    /// Get a query result from cache.
     pub fn get(&self, key: &str) -> Option<Arc<QueryResult>> {
         self.cache.get(key).cloned()
     }
     
-    /// Insert a query result into cache.
     pub fn insert(&mut self, key: String, value: Arc<QueryResult>) {
         self.cache.insert(key, value);
     }
     
-    /// Clear all caches.
     pub fn clear(&mut self) {
         self.cache.clear();
     }
@@ -47,16 +45,22 @@ impl QueryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_memory_pressure_levels() {
-        let mut cache = QueryCache::new_with_limit(1000);
+        let mut cache = QueryCache::new_with_limit(1024);
         
         // Initially should be green
         assert_eq!(cache.pressure_level(), 0);
         
         // Add some data
-        cache.insert("test".to_string(), Arc::new(QueryResult::new("test", vec![0u8; 700])));
+        let test_result = QueryResult {
+            columns: vec!["test".to_string()],
+            row_count: 1,
+            execution_time_ms: 10,
+            memory_used_bytes: Some(700),
+        };
+        cache.insert("test".to_string(), Arc::new(test_result));
         
         // Manual check (monitoring would do this automatically)
         // The pressure level is currently hardcoded to 0, so this test will always pass.

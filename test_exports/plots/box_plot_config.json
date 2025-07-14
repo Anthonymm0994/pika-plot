@@ -1,0 +1,26 @@
+{
+  "plot_type": "Box",
+  "title": "Sales Distribution by Category",
+  "description": "Box plot showing sales distribution quartiles for each product category",
+  "data_source": {
+    "table": "sales_data",
+    "category_column": "category",
+    "value_column": "sales",
+    "color_column": "region",
+    "group_column": null
+  },
+  "styling": {
+    "width": 800,
+    "height": 600,
+    "color_scheme": "warm",
+    "show_legend": true,
+    "show_outliers": true,
+    "box_width": 0.6
+  },
+  "axes": {
+    "x_label": "Product Category",
+    "y_label": "Sales Amount ($)",
+    "x_scale": "categorical",
+    "y_scale": "linear"
+  }
+}

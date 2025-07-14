@@ -1,0 +1,27 @@
+{
+  "plot_type": "Scatter",
+  "title": "Sales vs Quantity Analysis",
+  "description": "Scatter plot showing relationship between sales amount and quantity sold, colored by category",
+  "data_source": {
+    "table": "sales_data",
+    "x_column": "quantity",
+    "y_column": "sales",
+    "color_column": "category",
+    "size_column": "rating",
+    "group_column": "region"
+  },
+  "styling": {
+    "width": 800,
+    "height": 600,
+    "color_scheme": "viridis",
+    "show_legend": true,
+    "point_size": 6,
+    "alpha": 0.7
+  },
+  "axes": {
+    "x_label": "Quantity Sold",
+    "y_label": "Sales Amount ($)",
+    "x_scale": "linear",
+    "y_scale": "linear"
+  }
+}

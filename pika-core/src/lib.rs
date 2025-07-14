@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let err = PikaError::internal("Test error message");
+        let err = PikaError::Internal("Test error message".to_string());
         let msg = err.to_string();
         assert!(msg.contains("Test error message"));
     }

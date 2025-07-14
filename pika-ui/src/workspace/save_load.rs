@@ -19,7 +19,7 @@ pub fn save_workspace(state: &AppState, path: &Path) -> Result<()> {
         .map_err(|e| PikaError::Internal(format!("Failed to serialize workspace: {}", e)))?;
     
     fs::write(path, json)
-        .map_err(|e| PikaError::FileWriteError(format!("Failed to write workspace file: {}", e)))?;
+        .map_err(|e| PikaError::Export(format!("Failed to write workspace file: {}", e)))?;
     
     Ok(())
 }

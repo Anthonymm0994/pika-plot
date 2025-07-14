@@ -1,6 +1,7 @@
 //! Plot type definitions and configurations.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Plot types supported by the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -46,6 +47,37 @@ pub enum PlotType {
     Distribution,
 }
 
+impl fmt::Display for PlotType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PlotType::Scatter => write!(f, "Scatter"),
+            PlotType::Line => write!(f, "Line"),
+            PlotType::Bar => write!(f, "Bar"),
+            PlotType::Histogram => write!(f, "Histogram"),
+            PlotType::BoxPlot => write!(f, "Box Plot"),
+            PlotType::Violin => write!(f, "Violin"),
+            PlotType::Heatmap => write!(f, "Heatmap"),
+            PlotType::Correlation => write!(f, "Correlation"),
+            PlotType::Scatter3D => write!(f, "3D Scatter"),
+            PlotType::Surface3D => write!(f, "3D Surface"),
+            PlotType::Contour => write!(f, "Contour"),
+            PlotType::TimeSeries => write!(f, "Time Series"),
+            PlotType::Candlestick => write!(f, "Candlestick"),
+            PlotType::Stream => write!(f, "Stream"),
+            PlotType::Treemap => write!(f, "Treemap"),
+            PlotType::Sunburst => write!(f, "Sunburst"),
+            PlotType::Sankey => write!(f, "Sankey"),
+            PlotType::Network => write!(f, "Network"),
+            PlotType::Radar => write!(f, "Radar"),
+            PlotType::Polar => write!(f, "Polar"),
+            PlotType::ParallelCoordinates => write!(f, "Parallel Coordinates"),
+            PlotType::Geo => write!(f, "Geographic"),
+            PlotType::Anomaly => write!(f, "Anomaly Detection"),
+            PlotType::Distribution => write!(f, "Distribution"),
+        }
+    }
+}
+
 /// Main plot configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlotConfig {
@@ -55,6 +87,7 @@ pub struct PlotConfig {
     pub y_label: Option<String>,
     pub width: u32,
     pub height: u32,
+    pub dark_mode: bool,
     pub specific: PlotDataConfig,
 }
 
@@ -323,6 +356,7 @@ impl PlotConfig {
             y_label: Some(y.clone()),
             width: 800,
             height: 600,
+            dark_mode: false,
             specific: PlotDataConfig::ScatterConfig {
                 x_column: x,
                 y_column: y,
@@ -343,6 +377,7 @@ impl PlotConfig {
             y_label: Some(y.clone()),
             width: 800,
             height: 600,
+            dark_mode: false,
             specific: PlotDataConfig::LineConfig {
                 x_column: x,
                 y_column: y,
@@ -363,6 +398,7 @@ impl PlotConfig {
             y_label: Some(value.clone()),
             width: 800,
             height: 600,
+            dark_mode: false,
             specific: PlotDataConfig::BarConfig {
                 category_column: category,
                 value_column: value,
@@ -382,6 +418,7 @@ impl PlotConfig {
             y_label: Some("Count".to_string()),
             width: 800,
             height: 600,
+            dark_mode: false,
             specific: PlotDataConfig::HistogramConfig {
                 column,
                 num_bins: 30,

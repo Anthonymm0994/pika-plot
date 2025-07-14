@@ -1,476 +1,470 @@
-//! Enhanced CSV handling functionality extracted from pebble
-//! Provides advanced CSV reading, writing, and analysis capabilities
+//! Enhanced CSV processing with statistical analysis and type inference.
 
-use csv::{Reader, Writer, StringRecord, ReaderBuilder, WriterBuilder};
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::io::{BufReader, BufWriter, BufRead};
-use pika_core::{Result, PikaError, types::ImportOptions};
-use arrow::record_batch::RecordBatch;
-use arrow::array::{StringArray, Float64Array, Int64Array, ArrayRef};
-use arrow::datatypes::{Schema, Field, DataType};
-use std::sync::Arc;
+use std::path::Path;
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+use pika_core::error::{PikaError, Result};
 
-/// Enhanced CSV reader with advanced features
-pub struct EnhancedCsvReader {
-    path: PathBuf,
-    options: ImportOptions,
-    reader: Option<Reader<BufReader<File>>>,
-    sample_cache: Option<Vec<StringRecord>>,
-    headers_cache: Option<Vec<String>>,
-}
-
-impl EnhancedCsvReader {
-    /// Create a new enhanced CSV reader
-    pub fn new<P: AsRef<Path>>(path: P, options: ImportOptions) -> Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        if !path.exists() {
-            return Err(PikaError::internal(format!("CSV file '{}' does not exist", path.display())));
-        }
-        
-        Ok(Self {
-            path,
-            options,
-            reader: None,
-            sample_cache: None,
-            headers_cache: None,
-        })
-    }
-    
-    /// Build a CSV reader with current options
-    fn build_reader(&self) -> Result<Reader<BufReader<File>>> {
-        let file = File::open(&self.path)
-            .map_err(|e| PikaError::internal(format!("Failed to open file: {}", e)))?;
-        
-        let reader = ReaderBuilder::new()
-            .delimiter(self.options.delimiter as u8)
-            .has_headers(self.options.has_header)
-            .quote(self.options.quote_char.unwrap_or('"') as u8)
-            .escape(self.options.escape_char.map(|c| c as u8))
-            .from_reader(BufReader::new(file));
-        
-        Ok(reader)
-    }
-    
-    /// Get column headers
-    pub fn headers(&mut self) -> Result<Vec<String>> {
-        if let Some(cached) = &self.headers_cache {
-            return Ok(cached.clone());
-        }
-        
-        let headers = if self.options.has_header {
-            let mut reader = self.build_reader()?;
-            if let Some(result) = reader.records().next() {
-                result.map_err(|e| PikaError::internal(format!("Failed to read headers: {}", e)))?
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<String>>()
-            } else {
-                return Err(PikaError::internal("Empty CSV file".to_string()));
-            }
-        } else {
-            // Generate default column names
-            let sample = self.sample_records(1)?;
-            if sample.is_empty() {
-                return Err(PikaError::internal("Empty CSV file".to_string()));
-            }
-            
-            (0..sample[0].len())
-                .map(|i| format!("column_{}", i))
-                .collect::<Vec<String>>()
-        };
-        
-        self.headers_cache = Some(headers.clone());
-        Ok(headers)
-    }
-    
-    /// Get a sample of records for analysis
-    pub fn sample_records(&mut self, n: usize) -> Result<Vec<StringRecord>> {
-        if let Some(cached) = &self.sample_cache {
-            return Ok(cached.iter().take(n).cloned().collect());
-        }
-        
-        let mut reader = self.build_reader()?;
-        let mut records = Vec::new();
-        
-        // Skip header if present
-        if self.options.has_header {
-            if let Some(result) = reader.records().next() {
-                result.map_err(|e| PikaError::internal(format!("Failed to read header: {}", e)))?;
-            }
-        }
-        
-        // Skip initial rows if specified
-        for _ in 0..self.options.skip_rows {
-            if let Some(result) = reader.records().next() {
-                result.map_err(|e| PikaError::internal(format!("Failed to skip row: {}", e)))?;
-            }
-        }
-        
-        // Read sample records
-        for (i, result) in reader.records().enumerate() {
-            if i >= n {
-                break;
-            }
-            let record = result.map_err(|e| PikaError::internal(format!("Failed to read record {}: {}", i, e)))?;
-            records.push(record);
-        }
-        
-        self.sample_cache = Some(records.clone());
-        Ok(records)
-    }
-    
-    /// Analyze column types from sample data
-    pub fn analyze_column_types(&mut self, sample_size: usize) -> Result<Vec<DataType>> {
-        let sample = self.sample_records(sample_size)?;
-        let headers = self.headers()?;
-        
-        if sample.is_empty() {
-            return Ok(vec![DataType::Utf8; headers.len()]);
-        }
-        
-        let mut column_types = vec![DataType::Utf8; headers.len()];
-        
-        for (col_idx, _header) in headers.iter().enumerate() {
-            let mut all_integers = true;
-            let mut all_floats = true;
-            let mut has_values = false;
-            
-            for record in &sample {
-                if let Some(value) = record.get(col_idx) {
-                    if !value.trim().is_empty() {
-                        has_values = true;
-                        
-                        // Try to parse as integer
-                        if all_integers && value.parse::<i64>().is_err() {
-                            all_integers = false;
-                        }
-                        
-                        // Try to parse as float
-                        if all_floats && value.parse::<f64>().is_err() {
-                            all_floats = false;
-                        }
-                        
-                        // If neither integer nor float, it's a string
-                        if !all_integers && !all_floats {
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if has_values {
-                if all_integers {
-                    column_types[col_idx] = DataType::Int64;
-                } else if all_floats {
-                    column_types[col_idx] = DataType::Float64;
-                }
-            }
-        }
-        
-        Ok(column_types)
-    }
-    
-    /// Read all records and convert to Arrow RecordBatch
-    pub fn to_record_batch(&mut self) -> Result<RecordBatch> {
-        let headers = self.headers()?;
-        let column_types = self.analyze_column_types(1000)?;
-        
-        // Build schema
-        let fields: Vec<Field> = headers.iter()
-            .zip(column_types.iter())
-            .map(|(name, data_type)| Field::new(name, data_type.clone(), true))
-            .collect();
-        let schema = Schema::new(fields);
-        
-        // Read all records
-        let mut reader = self.build_reader()?;
-        let mut records = Vec::new();
-        
-        // Skip header if present
-        if self.options.has_header {
-            if let Some(result) = reader.records().next() {
-                result.map_err(|e| PikaError::internal(format!("Failed to read header: {}", e)))?;
-            }
-        }
-        
-        // Skip initial rows if specified
-        for _ in 0..self.options.skip_rows {
-            if let Some(result) = reader.records().next() {
-                result.map_err(|e| PikaError::internal(format!("Failed to skip row: {}", e)))?;
-            }
-        }
-        
-        // Read data records
-        let mut record_count = 0;
-        for result in reader.records() {
-            if let Some(max_rows) = self.options.max_rows {
-                if record_count >= max_rows {
-                    break;
-                }
-            }
-            
-            let record = result.map_err(|e| PikaError::internal(format!("Failed to read record {}: {}", record_count, e)))?;
-            records.push(record);
-            record_count += 1;
-        }
-        
-        // Convert to Arrow arrays
-        let mut arrays: Vec<ArrayRef> = Vec::new();
-        
-        for (col_idx, data_type) in column_types.iter().enumerate() {
-            match data_type {
-                DataType::Int64 => {
-                    let values: Vec<Option<i64>> = records.iter()
-                        .map(|record| {
-                            record.get(col_idx)
-                                .and_then(|s| if s.trim().is_empty() { None } else { s.parse().ok() })
-                        })
-                        .collect();
-                    arrays.push(Arc::new(Int64Array::from(values)));
-                }
-                DataType::Float64 => {
-                    let values: Vec<Option<f64>> = records.iter()
-                        .map(|record| {
-                            record.get(col_idx)
-                                .and_then(|s| if s.trim().is_empty() { None } else { s.parse().ok() })
-                        })
-                        .collect();
-                    arrays.push(Arc::new(Float64Array::from(values)));
-                }
-                _ => {
-                    let values: Vec<Option<String>> = records.iter()
-                        .map(|record| {
-                            record.get(col_idx)
-                                .map(|s| if s.trim().is_empty() { None } else { Some(s.to_string()) })
-                                .unwrap_or(None)
-                        })
-                        .collect();
-                    arrays.push(Arc::new(StringArray::from(values)));
-                }
-            }
-        }
-        
-        RecordBatch::try_new(Arc::new(schema), arrays)
-            .map_err(|e| PikaError::internal(format!("Failed to create RecordBatch: {}", e)))
-    }
-    
-    /// Get file statistics
-    pub fn file_stats(&self) -> Result<CsvFileStats> {
-        let metadata = std::fs::metadata(&self.path)
-            .map_err(|e| PikaError::internal(format!("Failed to get file metadata: {}", e)))?;
-        
-        // Simple estimation based on file size (rough approximation)
-        let estimated_rows = if metadata.len() > 0 {
-            (metadata.len() / 50).max(1) as usize  // Rough estimate: 50 bytes per row
-        } else {
-            0
-        };
-        
-        let final_estimated_rows = if self.options.has_header {
-            estimated_rows.saturating_sub(1)
-        } else {
-            estimated_rows
-        };
-        
-        Ok(CsvFileStats {
-            file_size: metadata.len(),
-            estimated_rows: final_estimated_rows,
-            encoding: self.options.encoding.clone(),
-            delimiter: self.options.delimiter,
-            has_header: self.options.has_header,
-        })
-    }
-}
-
-/// Enhanced CSV writer with advanced features
-pub struct EnhancedCsvWriter {
-    writer: Writer<BufWriter<File>>,
-    options: CsvWriteOptions,
-}
-
-#[derive(Debug, Clone)]
-pub struct CsvWriteOptions {
-    pub delimiter: char,
-    pub quote_char: char,
-    pub escape_char: Option<char>,
-    pub quote_style: QuoteStyle,
-    pub include_headers: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum QuoteStyle {
-    Always,
-    Necessary,
-    Never,
-}
-
-impl Default for CsvWriteOptions {
-    fn default() -> Self {
-        Self {
-            delimiter: ',',
-            quote_char: '"',
-            escape_char: None,
-            quote_style: QuoteStyle::Necessary,
-            include_headers: true,
-        }
-    }
-}
-
-impl EnhancedCsvWriter {
-    /// Create a new enhanced CSV writer
-    pub fn new<P: AsRef<Path>>(path: P, options: CsvWriteOptions) -> Result<Self> {
-        let file = File::create(path)
-            .map_err(|e| PikaError::internal(format!("Failed to create file: {}", e)))?;
-        
-        let mut builder = WriterBuilder::new();
-        builder.delimiter(options.delimiter as u8);
-        builder.quote(options.quote_char as u8);
-        if let Some(escape) = options.escape_char {
-            builder.escape(escape as u8);
-        }
-        
-        let writer = builder.from_writer(BufWriter::new(file));
-        
-        Ok(Self { writer, options })
-    }
-    
-    /// Write headers
-    pub fn write_headers(&mut self, headers: &[String]) -> Result<()> {
-        if self.options.include_headers {
-            self.writer.write_record(headers)
-                .map_err(|e| PikaError::internal(format!("Failed to write headers: {}", e)))?;
-        }
-        Ok(())
-    }
-    
-    /// Write a single record
-    pub fn write_record(&mut self, record: &[String]) -> Result<()> {
-        self.writer.write_record(record)
-            .map_err(|e| PikaError::internal(format!("Failed to write record: {}", e)))?;
-        Ok(())
-    }
-    
-    /// Write a RecordBatch to CSV
-    pub fn write_record_batch(&mut self, batch: &RecordBatch) -> Result<()> {
-        let schema = batch.schema();
-        
-        // Write headers if enabled
-        if self.options.include_headers {
-            let headers: Vec<String> = schema.fields()
-                .iter()
-                .map(|field| field.name().clone())
-                .collect();
-            self.write_headers(&headers)?;
-        }
-        
-        // Write data rows
-        for row_idx in 0..batch.num_rows() {
-            let mut row_data = Vec::new();
-            
-            for col_idx in 0..batch.num_columns() {
-                let array = batch.column(col_idx);
-                let value = if array.is_null(row_idx) {
-                    String::new()
-                } else {
-                    arrow::util::display::array_value_to_string(array, row_idx)
-                        .unwrap_or_else(|_| String::new())
-                };
-                row_data.push(value);
-            }
-            
-            self.write_record(&row_data)?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Flush the writer
-    pub fn flush(&mut self) -> Result<()> {
-        self.writer.flush()
-            .map_err(|e| PikaError::internal(format!("Failed to flush writer: {}", e)))?;
-        Ok(())
-    }
-}
-
-/// CSV file statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsvFileStats {
-    pub file_size: u64,
+    pub file_path: std::path::PathBuf,
+    pub file_size_bytes: u64,
     pub estimated_rows: usize,
-    pub encoding: String,
+    pub sample_rows: Vec<Vec<String>>,
+    pub column_stats: Vec<ColumnStats>,
     pub delimiter: char,
     pub has_header: bool,
+    pub encoding: String,
+    pub null_values: Vec<String>,
 }
 
-/// CSV analysis utilities
-pub struct CsvAnalyzer;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnStats {
+    pub name: String,
+    pub index: usize,
+    pub inferred_type: DataType,
+    pub null_count: usize,
+    pub unique_count: usize,
+    pub sample_values: Vec<String>,
+    pub min_length: usize,
+    pub max_length: usize,
+    pub numeric_stats: Option<NumericStats>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumericStats {
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub std_dev: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum DataType {
+    Text,
+    Integer,
+    Real,
+    Boolean,
+    Date,
+    DateTime,
+    Uuid,
+}
+
+impl DataType {
+    pub fn to_sql_type(&self) -> &'static str {
+        match self {
+            DataType::Text => "TEXT",
+            DataType::Integer => "INTEGER",
+            DataType::Real => "REAL",
+            DataType::Boolean => "BOOLEAN",
+            DataType::Date => "DATE",
+            DataType::DateTime => "DATETIME",
+            DataType::Uuid => "TEXT",
+        }
+    }
+}
+
+/// Enhanced CSV analyzer with fast statistical processing
+pub struct CsvAnalyzer {
+    sample_size: usize,
+    max_unique_values: usize,
+}
+
+impl Default for CsvAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CsvAnalyzer {
-    /// Detect delimiter from sample data
-    pub fn detect_delimiter<P: AsRef<Path>>(path: P) -> Result<char> {
-        let file = File::open(path)
-            .map_err(|e| PikaError::internal(format!("Failed to open file: {}", e)))?;
-        
-        let mut reader = BufReader::new(file);
-        let mut sample = String::new();
-        
-        // Read first few lines for analysis
-        for _ in 0..5 {
-            let mut line = String::new();
-            let bytes_read = reader.read_line(&mut line)
-                .map_err(|e| PikaError::internal(format!("Failed to read line: {}", e)))?;
-            if bytes_read == 0 {
-                break;
-            }
-            sample.push_str(&line);
+    pub fn new() -> Self {
+        Self {
+            sample_size: 10000,
+            max_unique_values: 1000,
         }
-        
-        // Count occurrences of common delimiters
-        let delimiters = [',', ';', '\t', '|'];
-        let mut counts = HashMap::new();
-        
-        for &delimiter in &delimiters {
-            counts.insert(delimiter, sample.matches(delimiter).count());
-        }
-        
-        // Return the most common delimiter
-        Ok(counts.into_iter()
-            .max_by_key(|(_, count)| *count)
-            .map(|(delimiter, _)| delimiter)
-            .unwrap_or(','))
     }
     
-    /// Detect if file has headers
-    pub fn detect_headers<P: AsRef<Path>>(path: P, delimiter: char) -> Result<bool> {
-        let mut reader = ReaderBuilder::new()
+    pub fn with_sample_size(mut self, size: usize) -> Self {
+        self.sample_size = size;
+        self
+    }
+    
+    /// Fast analysis of CSV file with statistical inference
+    pub async fn analyze_file<P: AsRef<Path>>(&self, path: P) -> Result<CsvFileStats> {
+        let path = path.as_ref();
+        let file_size = std::fs::metadata(path)
+            .map_err(|e| PikaError::Io(e))?
+            .len();
+        
+        // Fast delimiter detection
+        let delimiter = self.detect_delimiter(path)?;
+        
+        // Read sample for analysis
+        let (sample_rows, has_header) = self.read_sample(path, delimiter)?;
+        
+        if sample_rows.is_empty() {
+            return Err(PikaError::DataProcessing("Empty CSV file".to_string()));
+        }
+        
+        let column_count = sample_rows[0].len();
+        let estimated_rows = self.estimate_total_rows(file_size, &sample_rows);
+        
+        // Generate column statistics
+        let column_stats = self.analyze_columns(&sample_rows, has_header);
+        
+        Ok(CsvFileStats {
+            file_path: path.to_path_buf(),
+            file_size_bytes: file_size,
+            estimated_rows,
+            sample_rows,
+            column_stats,
+            delimiter,
+            has_header,
+            encoding: "UTF-8".to_string(),
+            null_values: vec!["".to_string(), "NULL".to_string(), "null".to_string(), "N/A".to_string()],
+        })
+    }
+    
+    fn detect_delimiter<P: AsRef<Path>>(&self, path: P) -> Result<char> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| PikaError::Io(e))?;
+        
+        let sample = content.lines().take(5).collect::<Vec<_>>().join("\n");
+        
+        let delimiters = [',', ';', '\t', '|'];
+        let mut best_delimiter = ',';
+        let mut best_score = 0;
+        
+        for &delimiter in &delimiters {
+            let mut reader = csv::ReaderBuilder::new()
+                .delimiter(delimiter as u8)
+                .has_headers(false)
+                .from_reader(sample.as_bytes());
+            
+            let mut consistent_columns = true;
+            let mut column_count = None;
+            let mut row_count = 0;
+            
+            for result in reader.records() {
+                if let Ok(record) = result {
+                    let current_count = record.len();
+                    
+                    if let Some(expected) = column_count {
+                        if current_count != expected {
+                            consistent_columns = false;
+                            break;
+                        }
+                    } else {
+                        column_count = Some(current_count);
+                    }
+                    
+                    row_count += 1;
+                    if row_count >= 5 { break; }
+                }
+            }
+            
+            if consistent_columns {
+                let score = column_count.unwrap_or(0) * row_count;
+                if score > best_score {
+                    best_score = score;
+                    best_delimiter = delimiter;
+                }
+            }
+        }
+        
+        Ok(best_delimiter)
+    }
+    
+    fn read_sample<P: AsRef<Path>>(&self, path: P, delimiter: char) -> Result<(Vec<Vec<String>>, bool)> {
+        let mut reader = csv::ReaderBuilder::new()
             .delimiter(delimiter as u8)
             .has_headers(false)
             .from_path(path)
-            .map_err(|e| PikaError::internal(format!("Failed to open file: {}", e)))?;
+            .map_err(|e| PikaError::DataProcessing(format!("Failed to read CSV: {}", e)))?;
         
-        let mut records = reader.records();
+        let mut rows = Vec::new();
         
-        // Get first two records
-        let first_record = records.next()
-            .ok_or_else(|| PikaError::internal("Empty file".to_string()))?
-            .map_err(|e| PikaError::internal(format!("Failed to read first record: {}", e)))?;
+        for (i, result) in reader.records().enumerate() {
+            if i >= self.sample_size {
+                break;
+            }
+            
+            match result {
+                Ok(record) => {
+                    let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
+                    rows.push(row);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Skipping malformed row {}: {}", i, e);
+                    continue;
+                }
+            }
+        }
         
-        let second_record = records.next()
-            .ok_or_else(|| PikaError::internal("File has only one record".to_string()))?
-            .map_err(|e| PikaError::internal(format!("Failed to read second record: {}", e)))?;
+        // Detect if first row is header
+        let has_header = if rows.len() >= 2 {
+            self.detect_header(&rows[0], &rows[1])
+        } else {
+            false
+        };
         
-        // Check if first record looks like headers
-        let first_numeric_count = first_record.iter()
-            .filter(|field| field.parse::<f64>().is_ok())
+        Ok((rows, has_header))
+    }
+    
+    fn detect_header(&self, first_row: &[String], second_row: &[String]) -> bool {
+        if first_row.len() != second_row.len() {
+            return false;
+        }
+        
+        let mut header_indicators = 0;
+        let total_columns = first_row.len();
+        
+        for (header_val, data_val) in first_row.iter().zip(second_row.iter()) {
+            // Check if header looks like a name (contains letters, no pure numbers)
+            let header_has_letters = header_val.chars().any(|c| c.is_alphabetic());
+            let header_is_number = header_val.parse::<f64>().is_ok();
+            
+            // Check if data looks different from header
+            let data_is_number = data_val.parse::<f64>().is_ok();
+            
+            if header_has_letters && !header_is_number {
+                header_indicators += 1;
+            }
+            
+            if header_has_letters && data_is_number {
+                header_indicators += 1;
+            }
+        }
+        
+        // If more than half the columns look like headers, assume first row is header
+        header_indicators > total_columns / 2
+    }
+    
+    fn estimate_total_rows(&self, file_size: u64, sample_rows: &[Vec<String>]) -> usize {
+        if sample_rows.is_empty() {
+            return 0;
+        }
+        
+        // Estimate average row size in bytes
+        let sample_size_bytes: usize = sample_rows.iter()
+            .map(|row| row.iter().map(|cell| cell.len() + 1).sum::<usize>()) // +1 for delimiter
+            .sum();
+        
+        let avg_row_size = sample_size_bytes as f64 / sample_rows.len() as f64;
+        
+        if avg_row_size > 0.0 {
+            (file_size as f64 / avg_row_size) as usize
+        } else {
+            sample_rows.len()
+        }
+    }
+    
+    fn analyze_columns(&self, rows: &[Vec<String>], has_header: bool) -> Vec<ColumnStats> {
+        if rows.is_empty() {
+            return Vec::new();
+        }
+        
+        let column_count = rows[0].len();
+        let data_start = if has_header { 1 } else { 0 };
+        let data_rows = &rows[data_start..];
+        
+        let mut column_stats = Vec::new();
+        
+        for col_idx in 0..column_count {
+            let column_name = if has_header && !rows[0].is_empty() && col_idx < rows[0].len() {
+                rows[0][col_idx].clone()
+            } else {
+                format!("column_{}", col_idx + 1)
+            };
+            
+            let column_values: Vec<&String> = data_rows.iter()
+                .filter_map(|row| row.get(col_idx))
+                .collect();
+            
+            let stats = self.analyze_column(&column_values, &column_name, col_idx);
+            column_stats.push(stats);
+        }
+        
+        column_stats
+    }
+    
+    fn analyze_column(&self, values: &[&String], name: &str, index: usize) -> ColumnStats {
+        let mut null_count = 0;
+        let mut unique_values = HashMap::new();
+        let mut numeric_values = Vec::new();
+        let mut min_length = usize::MAX;
+        let mut max_length = 0;
+        
+        for &value in values {
+            let trimmed = value.trim();
+            
+            // Count nulls
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") || trimmed.eq_ignore_ascii_case("n/a") {
+                null_count += 1;
+                continue;
+            }
+            
+            // Track lengths
+            min_length = min_length.min(trimmed.len());
+            max_length = max_length.max(trimmed.len());
+            
+            // Track unique values (up to limit)
+            if unique_values.len() < self.max_unique_values {
+                *unique_values.entry(trimmed.to_string()).or_insert(0) += 1;
+            }
+            
+            // Try to parse as number
+            if let Ok(num) = trimmed.parse::<f64>() {
+                numeric_values.push(num);
+            }
+        }
+        
+        if min_length == usize::MAX {
+            min_length = 0;
+        }
+        
+        // Infer data type
+        let inferred_type = self.infer_data_type(values, &numeric_values);
+        
+        // Calculate numeric statistics if applicable
+        let numeric_stats = if !numeric_values.is_empty() && numeric_values.len() > values.len() / 2 {
+            Some(self.calculate_numeric_stats(&numeric_values))
+        } else {
+            None
+        };
+        
+        // Get sample values
+        let sample_values: Vec<String> = unique_values.keys()
+            .take(10)
+            .cloned()
+            .collect();
+        
+        ColumnStats {
+            name: name.to_string(),
+            index,
+            inferred_type,
+            null_count,
+            unique_count: unique_values.len(),
+            sample_values,
+            min_length,
+            max_length,
+            numeric_stats,
+        }
+    }
+    
+    fn infer_data_type(&self, values: &[&String], numeric_values: &[f64]) -> DataType {
+        let non_null_count = values.iter()
+            .filter(|v| !v.trim().is_empty() && !v.trim().eq_ignore_ascii_case("null"))
             .count();
         
-        let second_numeric_count = second_record.iter()
-            .filter(|field| field.parse::<f64>().is_ok())
+        if non_null_count == 0 {
+            return DataType::Text;
+        }
+        
+        // Check if most values are numeric
+        let numeric_ratio = numeric_values.len() as f64 / non_null_count as f64;
+        
+        if numeric_ratio > 0.8 {
+            // Check if all numeric values are integers
+            let all_integers = numeric_values.iter()
+                .all(|&n| n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64);
+            
+            if all_integers {
+                return DataType::Integer;
+            } else {
+                return DataType::Real;
+            }
+        }
+        
+        // Check for boolean values
+        let boolean_count = values.iter()
+            .filter(|v| {
+                let trimmed = v.trim().to_lowercase();
+                trimmed == "true" || trimmed == "false" || 
+                trimmed == "yes" || trimmed == "no" ||
+                trimmed == "1" || trimmed == "0"
+            })
             .count();
         
-        // If first record has significantly fewer numeric values, it's likely headers
-        Ok(first_numeric_count < second_numeric_count / 2)
+        if boolean_count as f64 / non_null_count as f64 > 0.8 {
+            return DataType::Boolean;
+        }
+        
+        // Check for date patterns (basic)
+        let date_count = values.iter()
+            .filter(|v| self.looks_like_date(v))
+            .count();
+        
+        if date_count as f64 / non_null_count as f64 > 0.8 {
+            return DataType::Date;
+        }
+        
+        // Check for UUID patterns
+        let uuid_count = values.iter()
+            .filter(|v| self.looks_like_uuid(v))
+            .count();
+        
+        if uuid_count as f64 / non_null_count as f64 > 0.8 {
+            return DataType::Uuid;
+        }
+        
+        DataType::Text
+    }
+    
+    fn looks_like_date(&self, value: &str) -> bool {
+        let trimmed = value.trim();
+        
+        // Basic date patterns
+        let date_patterns = [
+            r"^\d{4}-\d{2}-\d{2}$",           // YYYY-MM-DD
+            r"^\d{2}/\d{2}/\d{4}$",           // MM/DD/YYYY
+            r"^\d{2}-\d{2}-\d{4}$",           // MM-DD-YYYY
+            r"^\d{4}/\d{2}/\d{2}$",           // YYYY/MM/DD
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}",  // ISO datetime
+        ];
+        
+        for pattern in &date_patterns {
+            if regex::Regex::new(pattern).unwrap().is_match(trimmed) {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    fn looks_like_uuid(&self, value: &str) -> bool {
+        let trimmed = value.trim();
+        
+        // UUID pattern: 8-4-4-4-12 hex digits
+        let uuid_pattern = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+        
+        regex::Regex::new(uuid_pattern).unwrap().is_match(trimmed)
+    }
+    
+    fn calculate_numeric_stats(&self, values: &[f64]) -> NumericStats {
+        if values.is_empty() {
+            return NumericStats {
+                min: 0.0,
+                max: 0.0,
+                mean: 0.0,
+                std_dev: 0.0,
+            };
+        }
+        
+        let min = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let max = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        
+        let variance = values.iter()
+            .map(|&x| (x - mean).powi(2))
+            .sum::<f64>() / values.len() as f64;
+        let std_dev = variance.sqrt();
+        
+        NumericStats {
+            min,
+            max,
+            mean,
+            std_dev,
+        }
     }
 } 

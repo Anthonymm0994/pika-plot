@@ -124,11 +124,10 @@ impl WorkspaceSnapshot {
         let snapshot: WorkspaceSnapshot = serde_json::from_str(&json)?;
         
         // Check version compatibility
-        if snapshot.version > Self::CURRENT_VERSION {
-            return Err(crate::error::PikaError::UnsupportedVersion {
-                found: snapshot.version,
-                expected: Self::CURRENT_VERSION,
-            });
+        if snapshot.version != Self::CURRENT_VERSION {
+            return Err(crate::error::PikaError::UnsupportedVersion(
+                format!("Found version {}, expected {}", snapshot.version, Self::CURRENT_VERSION)
+            ));
         }
         
         Ok(snapshot)

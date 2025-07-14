@@ -1,0 +1,15 @@
+{
+  "plot_type": "TimeSeries",
+  "title": "Weather Data Time Series",
+  "x_label": "Time",
+  "y_label": "Measurements",
+  "width": 1000,
+  "height": 600,
+  "specific": {
+    "type": "TimeSeriesConfig",
+    "time_column": "timestamp",
+    "value_columns": ["temperature", "humidity", "pressure"],
+    "aggregation": "None",
+    "show_range_selector": true
+  }
+} 

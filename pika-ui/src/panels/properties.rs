@@ -1,64 +1,64 @@
 //! Properties panel for selected nodes.
 
+use egui::{Ui, ScrollArea, Color32};
 use crate::state::AppState;
 use pika_core::events::AppEvent;
-use tokio::sync::broadcast::Sender;
-use egui::{Ui, ScrollArea, Color32};
+use tokio::sync::broadcast;
 
-/// Properties panel showing details of selected node.
-pub struct PropertiesPanel {}
+pub struct PropertiesPanel;
 
 impl PropertiesPanel {
     pub fn new() -> Self {
-        Self {}
+        Self
     }
-    
-    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, event_tx: &Sender<AppEvent>) {
-        if let Some(selected_id) = state.selected_node {
-            // Find the selected node
-            if let Some(node) = state.data_nodes.iter().find(|n| n.id == selected_id) {
-                ui.heading("Node Properties");
+
+    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, _event_tx: &broadcast::Sender<AppEvent>) {
+        ui.heading("Properties");
+        
+        ui.separator();
+        
+        if let Some(selected_node_id) = &state.selected_node {
+            if let Some(node) = state.get_data_node(*selected_node_id) {
+                ui.label(format!("Selected Node: {}", selected_node_id));
+                
+                // Find the selected node
+                ui.label(&node.table_info.name);
                 ui.separator();
                 
-                // Display node information
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.label(&node.table_info.name);
-                });
-                
-                ui.horizontal(|ui| {
-                    ui.label("Type:");
-                    ui.label("Table");
-                });
-                
-                ui.horizontal(|ui| {
-                    ui.label("Rows:");
-                    ui.label(format!("{}", node.table_info.row_count.map_or("Unknown".to_string(), |n| n.to_string())));
-                });
-                
-                ui.horizontal(|ui| {
-                    ui.label("Columns:");
-                    ui.label(format!("{}", node.table_info.columns.len()));
-                });
+                ui.label("📊 Table Information:");
+                ui.label(format!("Source: {}", 
+                    node.table_info.source_path.as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "Unknown".to_string())
+                ));
+                ui.label(format!("Rows: {}", 
+                    node.table_info.row_count.map_or("Unknown".to_string(), |n| n.to_string())
+                ));
+                ui.label(format!("Columns: {}", node.table_info.columns.len()));
                 
                 ui.separator();
-                
-                // Action buttons
-                ui.horizontal(|ui| {
-                    if ui.button("Preview").clicked() {
-                        let _ = event_tx.send(AppEvent::ExecuteQuery {
-                            node_id: selected_id,
-                            sql: format!("SELECT * FROM {} LIMIT 100", node.table_info.name),
-                        });
-                    }
-                    
-                    if ui.button("Edit").clicked() {
-                        // Would open edit dialog
-                    }
-                });
+                ui.label("📋 Column Details:");
+                for column in &node.table_info.columns {
+                    ui.horizontal(|ui| {
+                        ui.label(&column.name);
+                        ui.label(format!("({})", column.data_type));
+                        if column.nullable {
+                            ui.label("nullable");
+                        }
+                    });
+                }
             }
         } else {
             ui.label("No node selected");
+            ui.separator();
+            ui.label("Select a node on the canvas to view its properties");
         }
+        
+        ui.separator();
+        ui.heading("Canvas Info");
+        ui.label(format!("View Mode: {:?}", state.view_mode));
+        ui.label(format!("Zoom: {:.2}", state.zoom));
+        ui.label(format!("Pan: ({:.1}, {:.1})", state.pan.0, state.pan.1));
+        ui.label(format!("Total Nodes: {}", state.data_nodes.len()));
     }
 } 

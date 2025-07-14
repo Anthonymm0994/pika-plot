@@ -1,0 +1,25 @@
+{
+  "plot_type": "Histogram",
+  "title": "Sales Distribution Analysis",
+  "description": "Distribution of sales amounts across all transactions",
+  "data_source": {
+    "table": "sales_data",
+    "value_column": "sales",
+    "color_column": "category",
+    "group_column": "customer_type"
+  },
+  "styling": {
+    "width": 800,
+    "height": 600,
+    "color_scheme": "plasma",
+    "show_legend": true,
+    "bins": 20,
+    "alpha": 0.8
+  },
+  "axes": {
+    "x_label": "Sales Amount ($)",
+    "y_label": "Frequency",
+    "x_scale": "linear",
+    "y_scale": "linear"
+  }
+}

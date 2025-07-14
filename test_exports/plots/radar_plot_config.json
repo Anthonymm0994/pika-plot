@@ -1,0 +1,15 @@
+{
+  "plot_type": "Radar",
+  "title": "Multi-Dimensional Performance Radar",
+  "x_label": "Dimensions",
+  "y_label": "Performance",
+  "width": 600,
+  "height": 600,
+  "specific": {
+    "type": "RadarConfig",
+    "category_column": "category",
+    "value_columns": ["sales", "quantity", "price", "rating"],
+    "fill_alpha": 0.3,
+    "show_grid": true
+  }
+} 

@@ -1,0 +1,25 @@
+{
+  "plot_type": "Heatmap",
+  "title": "Sales Intensity by Region and Category",
+  "description": "Heatmap showing sales concentration across regions and product categories",
+  "data_source": {
+    "table": "sales_data",
+    "x_column": "region",
+    "y_column": "category",
+    "value_column": "sales",
+    "aggregation": "sum"
+  },
+  "styling": {
+    "width": 800,
+    "height": 600,
+    "color_scheme": "turbo",
+    "show_legend": true,
+    "show_values": true,
+    "interpolation": "bilinear"
+  },
+  "axes": {
+    "x_label": "Region",
+    "y_label": "Product Category",
+    "value_label": "Total Sales ($)"
+  }
+}

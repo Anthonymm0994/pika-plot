@@ -1,59 +1,74 @@
 //! Streaming data processing for large datasets.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use futures::Stream;
-use pika_core::error::{PikaError, Result};
+use pika_core::{
+    error::{PikaError, Result},
+    types::NodeId,
+};
 
-/// Stream of Arrow RecordBatches for processing large datasets
-pub struct RecordBatchStream {
-    // Placeholder for actual implementation
-    _phantom: std::marker::PhantomData<()>,
+use serde_json::Value;
+use std::collections::HashMap;
+
+/// Streaming query processor
+pub struct StreamingProcessor {
+    active_streams: HashMap<String, StreamInfo>,
 }
 
-impl RecordBatchStream {
-    /// Create a new record batch stream from a query
-    pub async fn from_query(_sql: &str) -> Result<Self> {
-        // TODO: Implement streaming query execution
-        Err(PikaError::not_implemented("Streaming queries"))
-    }
+#[derive(Debug, Clone)]
+struct StreamInfo {
+    query: String,
+    node_id: NodeId,
+    active: bool,
 }
 
-impl Stream for RecordBatchStream {
-    type Item = Result<duckdb::arrow::record_batch::RecordBatch>;
-    
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // TODO: Implement actual streaming
-        Poll::Ready(None)
-    }
-}
-
-/// Streaming aggregation for real-time data processing
-pub struct StreamingAggregator {
-    // Placeholder for actual implementation
-    _phantom: std::marker::PhantomData<()>,
-}
-
-impl StreamingAggregator {
-    /// Create a new streaming aggregator
+impl StreamingProcessor {
     pub fn new() -> Self {
-        StreamingAggregator {
-            _phantom: std::marker::PhantomData,
+        Self {
+            active_streams: HashMap::new(),
         }
     }
     
-    /// Process a batch of data
-    pub async fn process_batch(
+    /// Start a streaming query
+    pub async fn start_streaming_query(
         &mut self,
-        _batch: &duckdb::arrow::record_batch::RecordBatch,
+        _query_id: String,
+        _query: String,
+        _node_id: NodeId,
     ) -> Result<()> {
-        // TODO: Implement streaming aggregation
-        Err(PikaError::not_implemented("Streaming aggregation"))
+        Err(PikaError::Unsupported("Streaming queries not implemented yet".to_string()))
     }
     
-    /// Get current aggregation results
-    pub async fn get_results(&self) -> Result<duckdb::arrow::record_batch::RecordBatch> {
-        // TODO: Return aggregated results
-        Err(PikaError::not_implemented("Streaming results"))
+    /// Stop a streaming query
+    pub async fn stop_streaming_query(&mut self, _query_id: &str) -> Result<()> {
+        Ok(())
+    }
+    
+    /// Get streaming query status
+    pub fn get_stream_status(&self, _query_id: &str) -> Result<bool> {
+        Ok(false)
+    }
+    
+    /// List active streams
+    pub fn list_active_streams(&self) -> Vec<String> {
+        self.active_streams.keys().cloned().collect()
+    }
+    
+    /// Process streaming data
+    pub async fn process_stream_data(
+        &self,
+        _stream_id: &str,
+        _data: Value,
+    ) -> Result<Value> {
+        Err(PikaError::Unsupported("Streaming aggregation not implemented yet".to_string()))
+    }
+    
+    /// Get streaming results
+    pub async fn get_streaming_results(&self, _stream_id: &str) -> Result<Value> {
+        Err(PikaError::Unsupported("Streaming results not implemented yet".to_string()))
+    }
+}
+
+impl Default for StreamingProcessor {
+    fn default() -> Self {
+        Self::new()
     }
 } 

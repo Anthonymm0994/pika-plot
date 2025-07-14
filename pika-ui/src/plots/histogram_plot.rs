@@ -1,17 +1,16 @@
 use egui::{Ui, Color32};
-use egui_plot::{Plot, Bar, BarChart, Line, PlotPoints, Legend};
+use egui_plot::{Plot, PlotPoints, Polygon, Legend, PlotItem};
 use arrow::record_batch::RecordBatch;
-use pika_core::plots::{PlotConfig, PlotDataConfig, BinStrategy};
+use pika_core::plots::{PlotConfig, PlotDataConfig};
 use pika_engine::plot::extract_numeric_values;
+use crate::theme::{PlotTheme, get_theme_mode};
 
 pub struct HistogramPlot {
     column: String,
-    num_bins: usize,
-    bin_strategy: BinStrategy,
+    bins: usize,
+    bin_width: Option<f64>,
     show_density: bool,
-    show_normal: bool,
     show_legend: bool,
-    show_grid: bool,
 }
 
 impl HistogramPlot {
@@ -20,142 +19,100 @@ impl HistogramPlot {
             PlotDataConfig::HistogramConfig {
                 column,
                 num_bins,
-                bin_strategy,
+                bin_strategy: _,
                 show_density,
-                show_normal,
+                show_normal: _,
             } => Self {
                 column: column.clone(),
-                num_bins: *num_bins,
-                bin_strategy: *bin_strategy,
+                bins: *num_bins,
+                bin_width: None,
                 show_density: *show_density,
-                show_normal: *show_normal,
                 show_legend: true,
-                show_grid: true,
             },
             _ => panic!("Invalid config for histogram plot"),
         }
     }
     
     pub fn render(&self, ui: &mut Ui, data: &RecordBatch) {
-        let array = match data.column_by_name(&self.column) {
-            Some(arr) => arr,
+        // Get theme-aware colors
+        let theme_mode = get_theme_mode(ui.ctx());
+        let plot_theme = PlotTheme::for_mode(theme_mode);
+        
+        // Get the column array
+        let column_array = match data.column_by_name(&self.column) {
+            Some(array) => array,
             None => {
                 ui.colored_label(Color32::RED, format!("Column '{}' not found", self.column));
                 return;
             }
         };
         
-        let values_result = extract_numeric_values(array);
-        
-        match values_result {
+        match extract_numeric_values(column_array) {
             Ok(values) => {
-                let valid_values: Vec<f64> = values.into_iter()
-                    .filter(|v| !v.is_nan())
-                    .collect();
-                
-                if valid_values.is_empty() {
-                    ui.label("No valid numeric values to display");
+                if values.is_empty() {
+                    ui.colored_label(Color32::YELLOW, "No data to display");
                     return;
                 }
                 
-                // Calculate statistics
-                let mean = valid_values.iter().sum::<f64>() / valid_values.len() as f64;
-                let variance = valid_values.iter()
-                    .map(|v| (v - mean).powi(2))
-                    .sum::<f64>() / valid_values.len() as f64;
-                let std_dev = variance.sqrt();
-                let min = valid_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-                let max = valid_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                
-                // Determine number of bins
-                let num_bins = match self.bin_strategy {
-                    BinStrategy::Fixed => self.num_bins,
-                    BinStrategy::Sturges => (1.0_f64 + (valid_values.len() as f64).log2()).ceil() as usize,
-                    BinStrategy::Scott => {
-                        let h = 3.5 * std_dev / (valid_values.len() as f64).powf(1.0/3.0);
-                        ((max - min) / h).ceil() as usize
-                    }
-                    _ => self.num_bins,
-                }.max(1);
-                
-                // Create bins
-                let bin_width = (max - min) / num_bins as f64;
-                let mut bins = vec![0; num_bins];
-                
-                for &value in &valid_values {
-                    let bin_idx = ((value - min) / bin_width).floor() as usize;
-                    let bin_idx = bin_idx.min(num_bins - 1);
-                    bins[bin_idx] += 1;
-                }
-                
-                // Show statistics
-                ui.horizontal(|ui| {
-                    ui.label(format!("Count: {}", valid_values.len()));
-                    ui.separator();
-                    ui.label(format!("Mean: {:.2}", mean));
-                    ui.separator();
-                    ui.label(format!("Std Dev: {:.2}", std_dev));
-                    ui.separator();
-                    ui.label(format!("Min: {:.2}", min));
-                    ui.separator();
-                    ui.label(format!("Max: {:.2}", max));
+                // Calculate histogram
+                let (min_val, max_val) = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &val| {
+                    (min.min(val), max.max(val))
                 });
                 
-                let plot = Plot::new("histogram_plot")
+                let bin_width = self.bin_width.unwrap_or((max_val - min_val) / self.bins as f64);
+                let mut bins = vec![0; self.bins];
+                
+                for &value in &values {
+                    let bin_index = ((value - min_val) / bin_width).floor() as usize;
+                    let bin_index = bin_index.min(self.bins - 1);
+                    bins[bin_index] += 1;
+                }
+                
+                // Convert to density if requested
+                let total_area = values.len() as f64 * bin_width;
+                let scale = if self.show_density { 1.0 / total_area } else { 1.0 };
+                
+                // Create plot
+                let mut plot = Plot::new("histogram_plot")
                     .legend(Legend::default())
-                    .show_grid(self.show_grid)
-                    .auto_bounds(egui::Vec2b::new(true, true))
-                    .x_axis_label(&self.column)
-                    .y_axis_label(if self.show_density { "Density" } else { "Count" });
+                    .show_grid(true)
+                    .show_axes([true, true]);
+                
+                // Apply theme colors to plot
+                if theme_mode == crate::theme::ThemeMode::Dark {
+                    plot = plot.show_background(false);
+                }
                 
                 plot.show(ui, |plot_ui| {
-                    // Draw histogram bars
-                    let mut bars = Vec::new();
+                    // Create histogram bars as polygons
+                    let color = plot_theme.categorical_color(0);
+                    let fill_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 128);
+                    
                     for (i, &count) in bins.iter().enumerate() {
-                        let center = min + (i as f64 + 0.5) * bin_width;
-                        let height = if self.show_density {
-                            count as f64 / (valid_values.len() as f64 * bin_width)
-                        } else {
-                            count as f64
-                        };
+                        let x_left = min_val + i as f64 * bin_width;
+                        let x_right = x_left + bin_width;
+                        let height = count as f64 * scale;
                         
-                        bars.push(
-                            Bar::new(center, height)
-                                .width(bin_width)
-                                .fill(Color32::from_rgba_unmultiplied(92, 140, 97, 180))
-                        );
-                    }
-                    
-                    plot_ui.bar_chart(
-                        BarChart::new(bars)
-                            .color(Color32::from_rgb(92, 140, 97))
-                            .name("Histogram")
-                    );
-                    
-                    // Draw normal distribution overlay if enabled
-                    if self.show_normal {
-                        let num_points = 100;
-                        let mut normal_curve = Vec::new();
-                        
-                        for i in 0..=num_points {
-                            let x = min + (max - min) * i as f64 / num_points as f64;
-                            let z = (x - mean) / std_dev;
-                            let y = (-0.5_f64 * z * z).exp() / (std_dev * 2.5066282746310002_f64);
-                            normal_curve.push([x, y]);
+                        if height > 0.0 {
+                            let points = vec![
+                                [x_left, 0.0],
+                                [x_right, 0.0],
+                                [x_right, height],
+                                [x_left, height],
+                            ];
+                            
+                            let polygon = Polygon::new(PlotPoints::new(points))
+                                .fill_color(fill_color)
+                                .stroke(egui::Stroke::new(1.0, color))
+                                .width(1.0);
+                            
+                            plot_ui.polygon(polygon);
                         }
-                        
-                        plot_ui.line(
-                            Line::new(PlotPoints::new(normal_curve))
-                                .color(Color32::from_rgb(100, 100, 255))
-                                .width(2.0)
-                                .style(egui_plot::LineStyle::Dashed { length: 10.0 })
-                                .name("Normal")
-                        );
                     }
                 });
             }
             Err(e) => {
-                ui.colored_label(Color32::RED, format!("Error: {}", e));
+                ui.colored_label(Color32::RED, format!("Error rendering histogram: {}", e));
             }
         }
     }

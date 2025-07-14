@@ -9,21 +9,19 @@ repository = { workspace = true }
 
 [dependencies]
 # Core dependencies
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 ron = { workspace = true }
-thiserror = "1.0"
-uuid = { version = "1.5", features = ["v4", "serde"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
 tracing = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
-dunce = "1.0"
+dunce = { workspace = true }
 
-# Data types
-# Use DuckDB's arrow re-export in pika-engine instead
-# arrow = { workspace = true }
-duckdb = { workspace = true }
+# Basic CSV processing instead of duckdb/polars for now
+csv = { workspace = true }
 
 # UI types (needed for egui types in traits)
 egui = { workspace = true }

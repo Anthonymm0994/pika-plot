@@ -1,21 +1,17 @@
 [package]
 name = "pika-app"
-version = { workspace = true }
-authors = { workspace = true }
-edition = { workspace = true }
-rust-version = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
+version = "0.1.0"
+edition = "2021"
 
 [[bin]]
 name = "pika-plot"
 path = "src/main.rs"
 
 [dependencies]
-# Local crates
+# Core dependencies
 pika-core = { path = "../pika-core" }
-pika-engine = { path = "../pika-engine" }
 pika-ui = { path = "../pika-ui" }
+pika-engine = { path = "../pika-engine" }
 
 # UI framework
 eframe = { workspace = true }
@@ -23,10 +19,6 @@ egui = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
-flume = { workspace = true }
-
-# Sync primitives
-parking_lot = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
@@ -34,7 +26,3 @@ anyhow = { workspace = true }
 # Logging
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-
-# Windows-specific
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }

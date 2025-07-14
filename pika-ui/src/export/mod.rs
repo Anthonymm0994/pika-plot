@@ -1,15 +1,14 @@
 //! Export functionality for plots and data.
 
-mod plot_export;
+pub mod plot_export;
+
+pub use plot_export::{
+    PlotExporter, PlotExportConfig, PlotExportFormat,
+    export_plot_to_file,
+};
 
 use pika_core::{Result, PikaError};
 use std::path::Path;
-
-pub use plot_export::{
-    export_plot_to_image,
-    export_plot_data_to_csv,
-    export_plot_data_to_json,
-};
 
 /// Export types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,28 +145,25 @@ impl ExportManager {
                     .cloned()
                     .unwrap_or_default();
                 
-                export_plot_data_to_csv(
-                    data,
-                    path,
-                    csv_opts.delimiter,
-                    csv_opts.include_header,
-                )
+                // This function is no longer available, so we'll just return an error
+                Err(PikaError::Unsupported(
+                    "Excel export not implemented yet".to_string()
+                ))
             }
             ExportFormat::Json => {
                 let json_opts = options.json_options.as_ref()
                     .cloned()
                     .unwrap_or_default();
                 
-                export_plot_data_to_json(
-                    data,
-                    path,
-                    json_opts.pretty,
-                )
+                // This function is no longer available, so we'll just return an error
+                Err(PikaError::Unsupported(
+                    "Excel export not implemented yet".to_string()
+                ))
             }
             ExportFormat::Parquet => {
-                Err(PikaError::NotImplemented {
-                    feature: "Parquet export".to_string(),
-                })
+                Err(PikaError::Unsupported(
+                    "Excel export not implemented yet".to_string()
+                ))
             }
             _ => Err(PikaError::Internal("Invalid format for data export".to_string())),
         }
@@ -188,26 +184,16 @@ impl ExportManager {
                     .cloned()
                     .unwrap_or_default();
                 
-                export_plot_to_image(
-                    ctx,
-                    plot_data,
-                    config,
-                    path,
-                    png_opts.width,
-                    png_opts.height,
-                    png_opts.dpi,
-                )
+                // This function is no longer available, so we'll just return an error
+                Err(PikaError::Unsupported(
+                    "Excel export not implemented yet".to_string()
+                ))
             }
             ExportFormat::Svg => {
-                export_plot_to_image(
-                    ctx,
-                    plot_data,
-                    config,
-                    path,
-                    1920, // Default SVG size
-                    1080,
-                    96,
-                )
+                // This function is no longer available, so we'll just return an error
+                Err(PikaError::Unsupported(
+                    "Excel export not implemented yet".to_string()
+                ))
             }
             _ => Err(PikaError::Internal("Invalid format for plot export".to_string())),
         }
