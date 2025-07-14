@@ -491,8 +491,7 @@ impl FileConfigScreen {
                 .column(Column::exact(60.0)) // Unique
                 .column(Column::exact(50.0)) // Index
                 .min_scrolled_height(200.0)
-                .max_scroll_height(300.0)
-                .id_source(format!("column_table_{}", file_idx));
+                .max_scroll_height(300.0);
 
             table.body(|body| {
                 let row_height = text_height + 8.0;
@@ -564,7 +563,6 @@ impl FileConfigScreen {
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .columns(Column::auto(), preview.headers.len())
                     .max_scroll_height(available_height)
-                    .id_source(format!("data_preview_{}", self.current_file_index))
                     .header(20.0, |mut header| {
                         for col_name in &preview.headers {
                             header.col(|ui| {
