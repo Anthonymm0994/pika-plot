@@ -1,10 +1,9 @@
 //! Data panel showing loaded data nodes.
 
-use crate::state::{AppState, DataNode};
+use crate::state::{AppState, DataNode, CanvasNode, CanvasNodeType};
 use crate::panels::canvas_panel::AppEvent;
 use tokio::sync::broadcast::Sender;
 use egui::{Ui, ScrollArea};
-use egui::Response;
 use pika_core::types::NodeId;
 
 /// Data panel showing loaded data sources.
@@ -31,6 +30,11 @@ impl DataPanel {
         
         ui.separator();
         
+        // Help text
+        ui.label("Double-click to add to canvas");
+        
+        ui.separator();
+        
         // Search
         ui.horizontal(|ui| {
             ui.label("Search:");
@@ -42,6 +46,7 @@ impl DataPanel {
         // Data sources list
         ScrollArea::vertical().show(ui, |ui| {
             let mut to_remove = None;
+            let mut to_add_to_canvas = None;
             
             // List tables
             for node in &state.data_nodes {
@@ -64,6 +69,11 @@ impl DataPanel {
                         
                         if response.clicked() {
                             state.selected_node = Some(node.id);
+                        }
+                        
+                        // Double-click to add to canvas
+                        if response.double_clicked() {
+                            to_add_to_canvas = Some(node.table_info.clone());
                         }
                         
                         // Context menu
@@ -100,6 +110,21 @@ impl DataPanel {
             // Remove marked node outside the iteration
             if let Some(id) = to_remove {
                 state.remove_data_node(id);
+            }
+            
+            // Add to canvas outside the iteration
+            if let Some(table_info) = to_add_to_canvas {
+                let canvas_id = NodeId::new();
+                let node = CanvasNode {
+                    id: canvas_id,
+                    position: egui::Vec2::new(400.0, 300.0), // Center of typical canvas
+                    size: egui::Vec2::new(300.0, 200.0),
+                    node_type: CanvasNodeType::Table { 
+                        table_info,
+                    },
+                };
+                state.canvas_nodes.insert(canvas_id, node);
+                state.load_data_preview(canvas_id);
             }
         });
     }

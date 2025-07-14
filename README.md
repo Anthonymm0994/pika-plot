@@ -1,179 +1,150 @@
-# Pika-Plot
+# Pika-Plot 🎨📊
 
-<div align="center">
-
-![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
-![Status](https://img.shields.io/badge/status-beta-yellow.svg?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-59%20passing-brightgreen.svg?style=for-the-badge)
-
-**A modern data visualization canvas application built with Rust**
-
-[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Documentation](#documentation)
-
-</div>
+A modern, canvas-based data visualization tool that combines the flexibility of drawing applications with powerful data analysis capabilities.
 
 ## Overview
 
-Pika-Plot combines the intuitive canvas interaction of tools like Excalidraw with powerful data visualization capabilities. Import your data, create stunning visualizations, and build interactive data workflows—all on an infinite canvas.
+Pika-Plot provides an interactive canvas where you can:
+- Import and visualize data from multiple sources
+- Create various plot types with drag-and-drop simplicity
+- Annotate and draw directly on your analysis
+- Connect data sources to multiple visualizations
 
-## ✨ Features
+## Key Features
 
-### 🎨 Canvas-First Design
-- **Infinite Canvas**: Pan, zoom, and organize your data workflow spatially
-- **Drawing Tools**: Rectangle, circle, line, freehand drawing, and text annotations
-- **Node System**: Everything is a node—tables, plots, shapes, and text
-- **Smart Connections**: Bezier curve connections with type-aware coloring
+### 🎯 Interactive Canvas
+- **Paint-like drawing tools** - Rectangle, circle, line, freehand drawing, and text
+- **Live preview** - See shapes as you draw them
+- **Infinite canvas** - Pan and zoom to organize your analysis
+- **Grid system** - Optional grid for alignment
 
-### 📊 Comprehensive Visualizations
-26 plot types across multiple categories:
-- **Basic**: Scatter, Line, Bar, Histogram, Area
-- **Statistical**: Box Plot, Violin, Heatmap, Correlation Matrix
-- **Time Series**: Time Series, Candlestick, Stream, Calendar
-- **3D**: Scatter3D, Surface3D, Contour
-- **Specialized**: Network, Radar, Parallel Coordinates, Geographic
+### 📊 Data Visualization
+- **10+ plot types**: Histogram, scatter, line, bar, box plot, violin, heatmap, correlation, time series, radar
+- **Drag-and-drop workflow** - Double-click data sources to add to canvas
+- **Visual connections** - Bezier curves show data flow
+- **Live updates** - Plots update when data changes
 
 ### 📁 Data Management
-- **CSV Import**: Smart type inference with preview
-- **Column Configuration**: Set data types, primary keys, and constraints
-- **Live Preview**: See your data before importing
-- **Multiple Tables**: Work with multiple data sources simultaneously
+- **Multiple formats**: CSV, TSV, JSON, Parquet
+- **Table preview** - See your data directly on canvas
+- **Query support** - Transform data with SQL (coming soon)
+- **Large file handling** - Efficient processing of big datasets
 
-### 🎯 Professional UI/UX
-- **Dark Theme**: Easy on the eyes for extended use
-- **Context Menus**: Right-click for quick actions
-- **Keyboard Shortcuts**: Efficient workflow with standard shortcuts
-- **Responsive Panels**: Resizable panels that adapt to your workflow
+## Installation
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Rust 1.75.0 or higher
-- 8GB RAM recommended
-- Windows/Linux/macOS
-
-### Installation
-
+### From Source
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/pika-plot.git
 cd pika-plot
 
-# Build the project
+# Build in release mode
 cargo build --release
 
 # Run the application
-cargo run -p pika-app --release
+cargo run --release
 ```
 
-For platform-specific instructions, see [BUILD_AND_RUN.md](BUILD_AND_RUN.md).
+### Requirements
+- Rust 1.70 or higher
+- Windows 10/11, macOS, or Linux
+- OpenGL 3.3+ support
 
-## 📖 Usage
+## Quick Start
 
-### Quick Start
+1. **Launch Pika-Plot**
+   ```bash
+   cargo run --release
+   ```
 
-1. **Import Data**
-   - Click "➕ Import CSV..." in the Data Sources panel
-   - Select your file and configure import settings
-   - Preview and adjust column types
-   - Click "Create Database"
+2. **Import Data**
+   - Click "Import CSV" in the left panel
+   - Or drag and drop files onto the application
 
-2. **Create Visualizations**
-   - Click the green "+" button next to your table to add it to canvas
-   - Right-click the table node and select "Create Plot"
-   - Choose your plot type and configure properties
-   - See your visualization appear instantly
+3. **Create Visualizations**
+   - Double-click a data source to add it to canvas
+   - Right-click the table node and select "Add Plot"
+   - Choose your visualization type
 
-3. **Build Workflows**
-   - Connect nodes by dragging from output to input ports
-   - Add annotations with drawing tools
-   - Organize your canvas with shapes and text
-   - Save your workspace for later
+4. **Annotate**
+   - Use drawing tools to highlight insights
+   - Add text notes for explanations
+   - Draw shapes to group related items
 
-### Canvas Controls
-- **Pan**: Middle mouse button or Space + drag
-- **Zoom**: Ctrl + Mouse wheel
-- **Select**: Left click or drag to select multiple
-- **Delete**: Select and press Delete key
+## Canvas Tools
 
-## 🏗️ Architecture
+| Tool | Shortcut | Description |
+|------|----------|-------------|
+| Select | S | Select and move items |
+| Rectangle | R | Draw rectangles |
+| Circle | C | Draw circles |
+| Line | L | Draw straight lines |
+| Draw | D | Freehand drawing |
+| Text | T | Add text annotations |
+| Pan | P | Pan the canvas view |
 
-Pika-Plot uses a modular architecture with clear separation of concerns:
+## Architecture
 
+```mermaid
+graph TD
+    UI[UI Layer - egui] --> Engine[Data Engine - DuckDB]
+    UI --> Canvas[Canvas System]
+    Canvas --> Nodes[Node Types]
+    Nodes --> Table[Table Nodes]
+    Nodes --> Plot[Plot Nodes]
+    Nodes --> Shape[Shape Nodes]
+```
+
+## Development
+
+### Project Structure
 ```
 pika-plot/
-├── pika-core/      # Core types, events, and data structures
-├── pika-engine/    # Data processing and visualization engine
-├── pika-ui/        # User interface components
-├── pika-app/       # Main GUI application
-├── pika-cli/       # Command-line interface
-└── pika-traits/    # Shared trait definitions
+├── pika-ui/          # User interface
+├── pika-engine/      # Data processing engine
+├── pika-core/        # Core types and traits
+├── pika-app/         # Main application
+└── docs/             # Documentation
 ```
 
-Key architectural patterns:
-- **Event-Driven**: Loose coupling via broadcast channels
-- **Node-Based**: Everything on canvas is a node
-- **Type-Safe**: Leveraging Rust's type system
-- **Async I/O**: Non-blocking file operations
-
-## 📚 Documentation
-
-- [Architecture Patterns](docs/ARCHITECTURE_PATTERNS.md) - Design patterns and principles
-- [UI Component Guide](docs/UI_COMPONENT_GUIDE.md) - Visual guide to all UI components
-- [Code Quality Guide](docs/CODE_QUALITY_GUIDE.md) - Best practices and conventions
-- [Available Plot Types](docs/AVAILABLE_PLOT_TYPES.md) - All 26 visualization types
-- [Project Organization](docs/PROJECT_ORGANIZATION.md) - Crate structure and modules
-
-## 🧪 Testing
-
-The project includes comprehensive test coverage:
-
+### Building from Source
 ```bash
-# Run all tests
+# Debug build
+cargo build
+
+# Release build with optimizations
+cargo build --release
+
+# Run tests
 cargo test
 
-# Run tests for a specific crate
-cargo test -p pika-ui
-
-# Run with output
-cargo test -- --nocapture
+# Run with logging
+RUST_LOG=debug cargo run
 ```
 
-Current test status: **59 tests passing** ✅
+## Contributing
 
-## 🤝 Contributing
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-We welcome contributions! Please see our [Code Quality Guide](docs/CODE_QUALITY_GUIDE.md) for coding standards and best practices.
+### Areas for Contribution
+- New plot types
+- Data source connectors
+- Canvas tools and features
+- Performance optimizations
+- Documentation improvements
 
-### Development Setup
-
-```bash
-# Install development dependencies
-rustup component add clippy rustfmt
-
-# Format code
-cargo fmt
-
-# Run lints
-cargo clippy
-
-# Run benchmarks
-cargo bench
-```
-
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-Built with these excellent Rust crates:
-- [egui](https://github.com/emilk/egui) - Immediate mode GUI
-- [tokio](https://tokio.rs/) - Async runtime
-- [plotters](https://github.com/plotters-rs/plotters) - Plotting library
-- [serde](https://serde.rs/) - Serialization framework
+- Built with [egui](https://github.com/emilk/egui) for the UI
+- Powered by [DuckDB](https://duckdb.org/) for data processing
+- Inspired by tools like Excalidraw and Tableau
 
 ---
 
-<div align="center">
-Made with ❤️ and Rust
-</div> 
+**Status**: Active Development 🚀
+
+For questions, issues, or suggestions, please open an issue on GitHub. 

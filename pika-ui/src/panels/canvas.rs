@@ -24,6 +24,9 @@ pub struct CanvasPanel {
     drawing_start: Option<Pos2>,
     current_stroke: Vec<Pos2>,
     
+    /// Preview shape while drawing
+    preview_shape: Option<NodeId>,
+    
     /// Context menu position
     context_menu_pos: Option<Pos2>,
 }
@@ -38,6 +41,7 @@ impl CanvasPanel {
             zoom: 1.0,
             drawing_start: None,
             current_stroke: Vec::new(),
+            preview_shape: None,
             context_menu_pos: None,
         }
     }
@@ -299,31 +303,42 @@ impl CanvasPanel {
     }
     
     fn handle_shape_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, shape_type: ShapeType) {
-        if response.drag_started() {
+        if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 self.drawing_start = Some(from_screen(pos));
+                // Create preview shape
+                let id = NodeId::new();
+                self.preview_shape = Some(id);
             }
         }
         
-        if response.drag_stopped() {
-            if let Some(start_pos) = self.drawing_start {
+        if response.dragged() {
+            if let (Some(start_pos), Some(shape_id)) = (self.drawing_start, self.preview_shape) {
                 if let Some(pos) = response.interact_pointer_pos() {
                     let end_pos = from_screen(pos);
                     let size = (end_pos - start_pos).abs();
                     
                     if size.x > 5.0 && size.y > 5.0 {
-                        let id = NodeId::new();
                         let canvas_node = CanvasNode {
-                            id,
+                            id: shape_id,
                             position: start_pos.to_vec2().min(end_pos.to_vec2()),
                             size,
                             node_type: CanvasNodeType::Shape { shape_type },
                         };
-                        state.canvas_nodes.insert(id, canvas_node);
+                        
+                        // Update the preview shape
+                        state.canvas_nodes.insert(shape_id, canvas_node);
+                    } else {
+                        // Remove shape if too small
+                        state.canvas_nodes.remove(&shape_id);
                     }
                 }
             }
+        }
+        
+        if response.drag_stopped() {
             self.drawing_start = None;
+            self.preview_shape = None;
         }
     }
     
@@ -606,97 +621,116 @@ impl CanvasPanel {
                 painter.rect_filled(
                     rect,
                     5.0,
-                    if selected { Color32::from_rgb(60, 60, 80) } else { Color32::from_rgb(40, 40, 60) },
+                    if selected { Color32::from_rgb(50, 50, 70) } else { Color32::from_rgb(35, 35, 50) },
                 );
                 painter.rect_stroke(
                     rect,
                     5.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(100, 150, 250) } else { Color32::from_gray(100) }),
+                    Stroke::new(2.0, if selected { Color32::from_rgb(100, 150, 250) } else { Color32::from_gray(80) }),
                 );
                 
-                // Title
+                // Title bar
+                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 30.0));
+                painter.rect_filled(title_rect, 5.0, Color32::from_rgb(45, 45, 65));
+                
                 painter.text(
-                    rect.min + Vec2::new(10.0, 10.0),
+                    title_rect.min + Vec2::new(10.0, 8.0),
                     egui::Align2::LEFT_TOP,
                     &table_info.name,
                     FontId::proportional(14.0 * self.zoom),
                     Color32::WHITE,
                 );
                 
-                // Query input area
-                let query_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(5.0, table_info.columns.len() as f32 * 14.0 * self.zoom + 55.0),
-                    Vec2::new(rect.width() - 10.0, 60.0),
+                // Data preview area (always visible)
+                let data_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(5.0, 35.0),
+                    Vec2::new(rect.width() - 10.0, rect.height() - 40.0),
                 );
                 
-                // Only show query area if node is selected
-                if selected {
-                    painter.rect_filled(query_rect, 2.0, Color32::from_rgb(35, 35, 50));
-                    painter.rect_stroke(query_rect, 2.0, Stroke::new(1.0, Color32::from_gray(80)));
-                    
-                    // Get query text for this node
-                    let query_text = state.node_queries.get(&node.id)
-                        .map(|s| s.as_str())
-                        .unwrap_or("SELECT * FROM ... LIMIT 10");
-                    
-                    painter.text(
-                        query_rect.min + Vec2::new(5.0, 5.0),
-                        egui::Align2::LEFT_TOP,
-                        "Query:",
-                        FontId::proportional(10.0 * self.zoom),
-                        Color32::from_gray(150),
-                    );
-                    
-                    painter.text(
-                        query_rect.min + Vec2::new(5.0, 20.0),
-                        egui::Align2::LEFT_TOP,
-                        query_text,
-                        FontId::monospace(11.0 * self.zoom),
-                        Color32::from_gray(200),
-                    );
-                    
-                    // Show data preview if available
-                    if let Some(preview) = state.node_data.get(&node.id) {
-                        let data_rect = Rect::from_min_size(
-                            rect.min + Vec2::new(5.0, query_rect.bottom() - rect.min.y + 5.0),
-                            Vec2::new(rect.width() - 10.0, rect.bottom() - query_rect.bottom() - 10.0),
+                painter.rect_filled(data_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                
+                // Get or create preview data
+                if let Some(preview) = state.node_data.get(&node.id) {
+                    // Draw headers
+                    if let Some(headers) = &preview.headers {
+                        let header_y = data_rect.min.y + 5.0;
+                        let col_width = data_rect.width() / headers.len().max(1) as f32;
+                        
+                        // Header background
+                        painter.rect_filled(
+                            Rect::from_min_size(
+                                data_rect.min,
+                                Vec2::new(data_rect.width(), 25.0)
+                            ),
+                            0.0,
+                            Color32::from_rgb(30, 30, 45)
                         );
                         
-                        painter.rect_filled(data_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                        for (i, header) in headers.iter().enumerate() {
+                            painter.text(
+                                Pos2::new(data_rect.min.x + i as f32 * col_width + 5.0, header_y),
+                                egui::Align2::LEFT_TOP,
+                                header,
+                                FontId::proportional(12.0 * self.zoom),
+                                Color32::from_gray(220),
+                            );
+                        }
                         
-                        // Draw headers
-                        if let Some(headers) = &preview.headers {
-                            let header_y = data_rect.min.y + 5.0;
-                            let col_width = data_rect.width() / headers.len() as f32;
+                        // Draw rows
+                        if let Some(rows) = &preview.rows {
+                            let row_height = 20.0 * self.zoom;
+                            let max_rows = ((data_rect.height() - 30.0) / row_height) as usize;
                             
-                            for (i, header) in headers.iter().enumerate() {
-                                painter.text(
-                                    Pos2::new(data_rect.min.x + i as f32 * col_width + 5.0, header_y),
-                                    egui::Align2::LEFT_TOP,
-                                    header,
-                                                                            FontId::proportional(11.0 * self.zoom),
-                                    Color32::from_gray(220),
-                                );
-                            }
-                            
-                            // Draw rows
-                            if let Some(rows) = &preview.rows {
-                                for (row_idx, row) in rows.iter().take(3).enumerate() {
-                                    let row_y = header_y + (row_idx + 1) as f32 * 15.0 * self.zoom;
-                                    
-                                    for (col_idx, cell) in row.iter().enumerate() {
-                                        painter.text(
-                                            Pos2::new(data_rect.min.x + col_idx as f32 * col_width + 5.0, row_y),
-                                            egui::Align2::LEFT_TOP,
-                                            cell,
-                                            FontId::proportional(9.0 * self.zoom),
-                                            Color32::from_gray(180),
-                                        );
-                                    }
+                            for (row_idx, row) in rows.iter().take(max_rows).enumerate() {
+                                let row_y = header_y + 25.0 + row_idx as f32 * row_height;
+                                
+                                // Alternating row colors
+                                if row_idx % 2 == 1 {
+                                    painter.rect_filled(
+                                        Rect::from_min_size(
+                                            Pos2::new(data_rect.min.x, row_y - 3.0),
+                                            Vec2::new(data_rect.width(), row_height)
+                                        ),
+                                        0.0,
+                                        Color32::from_rgb(28, 28, 38)
+                                    );
+                                }
+                                
+                                for (col_idx, cell) in row.iter().enumerate() {
+                                    painter.text(
+                                        Pos2::new(data_rect.min.x + col_idx as f32 * col_width + 5.0, row_y),
+                                        egui::Align2::LEFT_TOP,
+                                        cell,
+                                        FontId::proportional(11.0 * self.zoom),
+                                        Color32::from_gray(180),
+                                    );
                                 }
                             }
+                            
+                            // Show row count
+                            painter.text(
+                                data_rect.min + Vec2::new(5.0, data_rect.height() - 20.0),
+                                egui::Align2::LEFT_TOP,
+                                &format!("Showing {} of {} rows", rows.len().min(max_rows), rows.len()),
+                                FontId::proportional(10.0 * self.zoom),
+                                Color32::from_gray(120),
+                            );
                         }
                     }
+                } else {
+                    // No data yet - show placeholder
+                    painter.text(
+                        data_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "Loading data...",
+                        FontId::proportional(12.0 * self.zoom),
+                        Color32::from_gray(100),
+                    );
+                }
+                
+                // Query area (only if selected)
+                if selected {
+                    // Query editing would go here if needed
                 }
             }
             CanvasNodeType::Plot { plot_type } => {
