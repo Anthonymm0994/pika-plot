@@ -2,7 +2,7 @@
 //! Matches Pebble's professional CSV import interface.
 
 use crate::state::AppState;
-use egui::{Color32, RichText, Ui};
+use egui::{Color32, RichText, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 use pika_core::types::{ColumnInfo, TableInfo};
 use std::collections::HashMap;
@@ -167,6 +167,18 @@ impl ColumnType {
             ColumnType::Boolean => "BOOLEAN",
         }
     }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            ColumnType::Integer => "Integer",
+            ColumnType::Text => "Text",
+            ColumnType::Real => "Real",
+            ColumnType::Blob => "Blob",
+            ColumnType::Date => "Date",
+            ColumnType::DateTime => "DateTime",
+            ColumnType::Boolean => "Boolean",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -245,101 +257,109 @@ impl FileConfigScreen {
         egui::CentralPanel::default()
             .frame(frame)
             .show(ctx, |ui| {
-                // Title bar
-                ui.horizontal(|ui| {
-                    ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("✕").size(20.0)).clicked() {
-                            state.view_mode = crate::state::ViewMode::Canvas;
-                        }
+                ui.style_mut().spacing.item_spacing = Vec2::new(10.0, 10.0);
+                
+                // Wrap everything in a unique ID based on screen instance
+                ui.push_id("file_config_main", |ui| {
+                    // Title bar
+                    ui.horizontal(|ui| {
+                        ui.heading(RichText::new("Create Database from CSV").color(Color32::WHITE).size(18.0));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("✕").size(20.0)).clicked() {
+                                state.view_mode = crate::state::ViewMode::Canvas;
+                            }
+                        });
                     });
-                });
 
-                ui.add_space(10.0);
-
-                // Database path
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
                     ui.add_space(10.0);
-                    
-                    let available_width = ui.available_width() - 100.0; // Leave space for Browse button
-                    let path_display = self.database_path.to_string_lossy().to_string();
-                    ui.add(egui::TextEdit::singleline(&mut path_display.clone())
-                        .desired_width(available_width.min(400.0))
-                        .interactive(false)
-                        .text_color(Color32::from_gray(180)));
-                    
-                    if ui.button("Browse...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
-                            .save_file()
+
+                    // Main content
+                    ui.columns(2, |columns| {
+                        // Left column
+                        columns[0].push_id("left_column", |ui| {
+                            self.render_database_config(ui);
+                            
+                            if !self.files.is_empty() {
+                                ui.add_space(10.0);
+                                self.render_file_configuration(ui);
+                            }
+                        });
+
+                        // Right column - data preview
+                        columns[1].push_id("right_column", |ui| {
+                            if !self.files.is_empty() {
+                                ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
+                                ui.separator();
+                                self.render_data_preview(ui);
+                            }
+                        });
+                    });
+
+                    // Bottom actions
+                    ui.add_space(20.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("Cancel").size(16.0))
+                            .on_hover_text("Cancel and return to canvas")
+                            .clicked() 
                         {
-                            self.database_path = path;
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-
-                // Use available space for the main content
-                let available_size = ui.available_size();
-                let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
-                let right_width = available_size.x - left_width - 10.0;
-
-                ui.horizontal_top(|ui| {
-                    // Left column - Configuration
-                    ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
-                        ui.vertical(|ui| {
-                            self.render_configuration_panel(ui);
-                        });
-                    });
-
-                    ui.add_space(10.0);
-
-                    // Right column - Preview
-                    ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
-                        ui.group(|ui| {
-                            ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
-                            ui.separator();
-                            self.render_data_preview(ui);
-                        });
-                    });
-                });
-
-                ui.add_space(10.0);
-
-                // Bottom buttons
-                ui.horizontal(|ui| {
-                    if ui.button(RichText::new("Cancel").size(14.0)).clicked() {
-                        state.view_mode = crate::state::ViewMode::Canvas;
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let enabled = !self.files.is_empty() && self.files.iter().any(|f| 
-                            f.columns.iter().any(|c| c.include)
-                        );
-                        
-                        let button = egui::Button::new(
-                            RichText::new(format!("✓ Create Database with {} Tables", self.files.len()))
-                                .size(14.0)
-                                .color(Color32::WHITE)
-                        )
-                        .fill(if enabled { Color32::from_rgb(34, 139, 34) } else { Color32::from_gray(60) });
-
-                        if ui.add_enabled(enabled, button).clicked() {
-                            result = Some(self.create_database());
                             state.view_mode = crate::state::ViewMode::Canvas;
                         }
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let can_proceed = !self.database_path.display().to_string().is_empty() 
+                                && self.files.iter().any(|f| f.columns.iter().any(|c| c.include));
+                            
+                            ui.add_enabled_ui(can_proceed, |ui| {
+                                if ui.button(RichText::new("Create Database →").color(Color32::from_rgb(100, 200, 100)).size(16.0))
+                                    .on_hover_text("Create database with selected configuration")
+                                    .clicked() 
+                                {
+                                    result = Some(self.create_database());
+                                    state.view_mode = crate::state::ViewMode::Canvas;
+                                }
+                            });
+                        });
                     });
-                });
 
-                // Error display
-                if let Some(error) = &self.error_message {
-                    ui.colored_label(Color32::from_rgb(255, 100, 100), error);
-                }
+                    if let Some(error) = &self.error_message {
+                        ui.colored_label(Color32::from_rgb(255, 100, 100), error);
+                    }
+                });
             });
 
         result
+    }
+
+    fn render_database_config(&mut self, ui: &mut Ui) {
+        ui.heading(RichText::new("Database Configuration").color(Color32::from_gray(200)));
+        ui.separator();
+        
+        // Database path
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
+            ui.add_space(10.0);
+            
+            let available_width = ui.available_width() - 100.0;
+            let path_display = self.database_path.to_string_lossy().to_string();
+            ui.add(egui::TextEdit::singleline(&mut path_display.clone())
+                .desired_width(available_width.min(400.0))
+                .interactive(false)
+                .text_color(Color32::from_gray(180)));
+                
+            if ui.button("Browse...").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("SQLite Database", &["db", "sqlite", "sqlite3"])
+                    .save_file()
+                {
+                    self.database_path = path;
+                }
+            }
+        });
+    }
+
+    fn render_file_configuration(&mut self, ui: &mut Ui) {
+        self.render_configuration_panel(ui);
     }
 
     fn render_configuration_panel(&mut self, ui: &mut Ui) {
@@ -535,27 +555,16 @@ impl FileConfigScreen {
             ui.add_space(10.0);
 
             // Delimiter
-            ui.label(RichText::new("Delimiter:").color(Color32::from_gray(200)));
-            ui.horizontal(|ui| {
-                let mut delimiter_changed = false;
-                
-                if ui.radio_value(&mut file.delimiter, Delimiter::Comma, "⚪ Comma").changed() {
-                    delimiter_changed = true;
-                }
-                if ui.radio_value(&mut file.delimiter, Delimiter::Tab, "⚪ Tab").changed() {
-                    delimiter_changed = true;
-                }
-                if ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "⚪ Semicolon").changed() {
-                    delimiter_changed = true;
-                }
-                if ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "⚪ Pipe").changed() {
-                    delimiter_changed = true;
-                }
-                
-                // Check if delimiter changed
-                if delimiter_changed && file.delimiter != prev_delimiter {
-                    need_reload = true;
-                }
+            ui.group(|ui| {
+                ui.heading(RichText::new("Delimiter:").color(Color32::from_gray(200)));
+                ui.horizontal_wrapped(|ui| {
+                    ui.push_id(format!("delimiter_{}", idx), |ui| {
+                        ui.radio_value(&mut file.delimiter, Delimiter::Comma, "• Comma");
+                        ui.radio_value(&mut file.delimiter, Delimiter::Tab, "• Tab");
+                        ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "• Semicolon");
+                        ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "• Pipe");
+                    });
+                });
             });
 
             ui.add_space(10.0);
@@ -564,10 +573,12 @@ impl FileConfigScreen {
             ui.group(|ui| {
                 ui.heading(RichText::new("Null Values").color(Color32::from_gray(200)));
                 ui.label(RichText::new("Values to treat as NULL:").color(Color32::from_gray(180)));
-                ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
-                ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
-                ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
-                ui.checkbox(&mut file.null_values.na, "☐ N/A");
+                ui.push_id(format!("null_values_{}", idx), |ui| {
+                    ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
+                    ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
+                    ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
+                    ui.checkbox(&mut file.null_values.na, "☐ N/A");
+                });
             });
         }
 
@@ -621,74 +632,87 @@ impl FileConfigScreen {
         if let Some(file) = self.files.get_mut(file_idx) {
             let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
             
-            let table = TableBuilder::new(ui)
-                .striped(true)
-                .resizable(false)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::exact(40.0)) // Include
-                .column(Column::auto()) // Column name
-                .column(Column::exact(100.0)) // Type
-                .column(Column::exact(35.0)) // PK
-                .column(Column::exact(70.0)) // Not Null
-                .column(Column::exact(60.0)) // Unique
-                .column(Column::exact(50.0)) // Index
-                .min_scrolled_height(200.0)
-                .max_scroll_height(300.0);
+            // Wrap table in unique ID scope
+            ui.scope(|ui| {
+                ui.push_id(format!("column_table_{}", file_idx), |ui| {
+                    let table = TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(false)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .column(Column::exact(40.0)) // Include
+                        .column(Column::auto()) // Column name
+                        .column(Column::exact(100.0)) // Type
+                        .column(Column::exact(35.0)) // PK
+                        .column(Column::exact(70.0)) // Not Null
+                        .column(Column::exact(60.0)) // Unique
+                        .column(Column::exact(50.0)) // Index
+                        .min_scrolled_height(200.0)
+                        .max_scroll_height(300.0);
 
-            table.body(|body| {
-                let row_height = text_height + 8.0;
-                let num_cols = file.columns.len();
-                
-                body.rows(row_height, num_cols, |mut row| {
-                    let row_index = row.index();
-                    
-                    row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].include, "");
-                    });
-                    
-                    row.col(|ui| {
-                        ui.label(&file.columns[row_index].name);
-                    });
-                    
-                    row.col(|ui| {
-                        let current_type = file.columns[row_index].data_type;
-                        egui::ComboBox::from_id_source(format!("type_{}_{}", file_idx, row_index))
-                            .selected_text(current_type.as_str())
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Integer, "Integer");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Text, "Text");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Real, "Real");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Blob, "Blob");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Date, "Date");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::DateTime, "DateTime");
-                                ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Boolean, "Boolean");
+                    table.body(|body| {
+                        let row_height = text_height + 8.0;
+                        let num_cols = file.columns.len();
+                        
+                        body.rows(row_height, num_cols, |mut row| {
+                            let row_index = row.index();
+                            
+                            row.col(|ui| {
+                                ui.push_id(row_index, |ui| {
+                                    ui.checkbox(&mut file.columns[row_index].include, "");
+                                });
                             });
-                    });
-                    
-                    row.col(|ui| {
-                        let was_pk = file.columns[row_index].is_primary_key;
-                        if ui.checkbox(&mut file.columns[row_index].is_primary_key, "").changed() {
-                            if file.columns[row_index].is_primary_key && !was_pk {
-                                // Unset other PKs - only one column can be primary key
-                                for (idx, col) in file.columns.iter_mut().enumerate() {
-                                    if idx != row_index {
-                                        col.is_primary_key = false;
+                            
+                            row.col(|ui| {
+                                ui.label(&file.columns[row_index].name);
+                            });
+                            
+                            row.col(|ui| {
+                                egui::ComboBox::from_id_source(format!("type_combo_{}_{}", file_idx, row_index))
+                                    .selected_text(file.columns[row_index].data_type.display_name())
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Text, "Text");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Integer, "Integer");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Real, "Real");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Blob, "Blob");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Date, "Date");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::DateTime, "DateTime");
+                                        ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Boolean, "Boolean");
+                                    });
+                            });
+                            
+                            row.col(|ui| {
+                                ui.push_id(format!("pk_{}_{}", file_idx, row_index), |ui| {
+                                    if ui.radio(file.columns[row_index].is_primary_key, "").clicked() {
+                                        // First unset all other primary keys
+                                        for (i, col) in file.columns.iter_mut().enumerate() {
+                                            if i != row_index {
+                                                col.is_primary_key = false;
+                                            }
+                                        }
+                                        // Then toggle this one
+                                        file.columns[row_index].is_primary_key = !file.columns[row_index].is_primary_key;
                                     }
-                                }
-                            }
-                        }
-                    });
-                    
-                    row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].not_null, "");
-                    });
-                    
-                    row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].unique, "");
-                    });
-                    
-                    row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].create_index, "");
+                                });
+                            });
+                            
+                            row.col(|ui| {
+                                ui.push_id(format!("notnull_{}_{}", file_idx, row_index), |ui| {
+                                    ui.checkbox(&mut file.columns[row_index].not_null, "");
+                                });
+                            });
+                            
+                            row.col(|ui| {
+                                ui.push_id(format!("unique_{}_{}", file_idx, row_index), |ui| {
+                                    ui.checkbox(&mut file.columns[row_index].unique, "");
+                                });
+                            });
+                            
+                            row.col(|ui| {
+                                ui.push_id(format!("index_{}_{}", file_idx, row_index), |ui| {
+                                    ui.checkbox(&mut file.columns[row_index].create_index, "");
+                                });
+                            });
+                        });
                     });
                 });
             });
@@ -700,31 +724,35 @@ impl FileConfigScreen {
             if let Some(preview) = &file.preview_data {
                 let available_height = ui.available_height();
                 
-                // Don't use push_id here as it might break the table
-                TableBuilder::new(ui)
-                    .striped(true)
-                    .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .columns(Column::auto(), preview.headers.len())
-                    .max_scroll_height(available_height)
-                    .header(20.0, |mut header| {
-                        for col_name in &preview.headers {
-                            header.col(|ui| {
-                                ui.label(RichText::new(col_name).strong());
-                            });
-                        }
-                    })
-                    .body(|mut body| {
-                        for (idx, data_row) in preview.rows.iter().enumerate() {
-                            body.row(18.0, |mut row| {
-                                for cell in data_row.iter() {
-                                    row.col(|ui| {
-                                        ui.label(cell);
+                // Wrap table in unique ID scope
+                ui.scope(|ui| {
+                    ui.push_id(format!("data_preview_table_{}", self.current_file_index), |ui| {
+                        TableBuilder::new(ui)
+                            .striped(true)
+                            .resizable(true)
+                            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                            .columns(Column::auto(), preview.headers.len())
+                            .max_scroll_height(available_height)
+                            .header(20.0, |mut header| {
+                                for col_name in &preview.headers {
+                                    header.col(|ui| {
+                                        ui.label(RichText::new(col_name).strong());
+                                    });
+                                }
+                            })
+                            .body(|mut body| {
+                                for (_idx, data_row) in preview.rows.iter().enumerate() {
+                                    body.row(18.0, |mut row| {
+                                        for cell in data_row.iter() {
+                                            row.col(|ui| {
+                                                ui.label(cell);
+                                            });
+                                        }
                                     });
                                 }
                             });
-                        }
                     });
+                });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("No preview available");
