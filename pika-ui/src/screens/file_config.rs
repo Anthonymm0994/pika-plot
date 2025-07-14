@@ -691,8 +691,9 @@ impl FileConfigScreen {
     fn render_data_preview(&mut self, ui: &mut Ui) {
         if let Some(file) = self.files.get(self.current_file_index) {
             if let Some(preview) = &file.preview_data {
-                let available_height = ui.available_height();
-                let header_row = file.header_row;
+                // Limit table height to leave room for buttons below
+                let max_height = 300.0;
+                let available_height = ui.available_height().min(max_height);
                 
                 // Wrap table in unique ID scope
                 ui.scope(|ui| {
@@ -711,17 +712,12 @@ impl FileConfigScreen {
                                 }
                             })
                             .body(|mut body| {
-                                for (row_idx, data_row) in preview.rows.iter().enumerate() {
-                                    let is_header_row = row_idx == 0 && header_row == 1;
-                                    
+                                // preview.rows already contains only data rows (header is separate)
+                                for data_row in preview.rows.iter() {
                                     body.row(18.0, |mut row| {
                                         for cell in data_row.iter() {
                                             row.col(|ui| {
-                                                if is_header_row {
-                                                    ui.label(RichText::new(cell).strong().color(Color32::from_rgb(120, 200, 255)));
-                                                } else {
-                                                    ui.label(cell);
-                                                }
+                                                ui.label(cell);
                                             });
                                         }
                                     });
