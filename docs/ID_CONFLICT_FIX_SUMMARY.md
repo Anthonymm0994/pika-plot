@@ -5,46 +5,43 @@ When importing multiple CSV files in Pika-Plot, egui was throwing ID conflict wa
 
 ## Solution Applied
 
-### ✅ Successful Fix
-The issue was resolved by restructuring the FileConfigScreen implementation to avoid ID conflicts:
+### ✅ Final Working Solution
+The ID conflicts were resolved by implementing comprehensive unique IDs for ALL widgets in the FileConfigScreen:
 
-1. **Removed problematic push_id wrappers** - The nested push_id calls were causing more problems than they solved
-2. **Fixed borrow checker issues** - Restructured code to avoid double mutable borrows
-3. **Added proper bounds checking** - Ensured current_file_index is always valid
-4. **Fixed preview loading** - Separated data loading from UI update logic
+1. **Wrapped all tables in unique scopes**:
+   - Column selection table: `ui.push_id(format!("column_table_{}", file_idx), ...)`
+   - Data preview table: `ui.push_id(format!("data_preview_table_{}", self.current_file_index), ...)`
 
-### Key Changes Made:
+2. **Added unique IDs to interactive widgets**:
+   - Checkboxes: `ui.push_id(row_index, ...)` for include checkbox
+   - Radio buttons: `ui.push_id(format!("pk_{}_{}", file_idx, row_index), ...)` for primary key
+   - ComboBoxes: `.from_id_source(format!("type_combo_{}_{}", file_idx, row_index))`
+   - Other checkboxes: Unique IDs based on purpose and row index
 
-1. **Removed instance_id usage** - The unique instance ID approach wasn't necessary and was complicating the code
+3. **Wrapped UI sections**:
+   - Main UI: `ui.push_id("file_config_main", ...)`
+   - Left column: `columns[0].push_id("left_column", ...)`
+   - Right column: `columns[1].push_id("right_column", ...)`
+   - Null values section: `ui.push_id(format!("null_values_{}", idx), ...)`
+   - Delimiter section: `ui.push_id(format!("delimiter_{}", idx), ...)`
 
-2. **Fixed file switching logic**:
-   - Added bounds checking before accessing files array
-   - Load preview data when switching between files
-   - Handle the preview loading after the ComboBox is closed to avoid borrow issues
+4. **Key Implementation Details**:
+   - Used `ui.scope()` and `ui.push_id()` to create unique ID contexts
+   - Each widget gets a unique ID based on its purpose and position
+   - File index and row index are used to ensure uniqueness across multiple files
+   - Removed default primary key selection for ID columns
 
-3. **Separated concerns**:
-   - Created standalone `infer_column_type` function
-   - Created `load_preview_data` method that returns Result instead of mutating state
-   - Inline column updates to avoid borrow checker issues
-
-4. **Fixed defaults**:
-   - Primary key is no longer set by default for ID columns
-   - Boolean type inference was added
-
-## Testing Steps
-
-1. Open Pika-Plot
-2. Click "Data" in left panel
-3. Import multiple CSV files
-4. Switch between files using the dropdown
-5. Verify no red ID conflict warnings appear
-6. Verify data preview shows correctly
-7. Verify you can configure columns for each file
+### Why This Solution Works
+- Every widget has a unique ID based on its context (file index, row index, purpose)
+- Tables are wrapped in unique scopes preventing internal ScrollArea conflicts
+- The hierarchical ID structure ensures no conflicts even with multiple files
+- Using format strings with indices guarantees uniqueness
 
 ## Result
-✅ ID conflicts are resolved
+✅ All egui ID conflict warnings are resolved
 ✅ File switching works without crashes
 ✅ Data preview displays correctly
+✅ All functionality preserved
 ✅ No primary key is selected by default
 
 The application now handles multiple CSV imports cleanly without any ID conflict warnings. 

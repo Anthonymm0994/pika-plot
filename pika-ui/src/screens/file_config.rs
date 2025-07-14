@@ -384,20 +384,12 @@ impl FileConfigScreen {
                 egui::ComboBox::from_id_source("csv_file_selector")
                     .selected_text(file_name)
                     .show_ui(ui, |ui| {
-                        let mut selected_idx = None;
                         for (idx, file) in self.files.iter().enumerate() {
                             let name = file.path.file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown");
                             
-                            if ui.selectable_value(&mut self.current_file_index, idx, name).clicked() {
-                                selected_idx = Some(idx);
-                            }
-                        }
-                        
-                        // Handle selection change after iteration
-                        if let Some(idx) = selected_idx {
-                            if idx < self.files.len() {
+                            if ui.selectable_label(self.current_file_index == idx, name).clicked() {
                                 self.current_file_index = idx;
                             }
                         }
@@ -410,49 +402,22 @@ impl FileConfigScreen {
                             .unwrap_or(false);
                             
                         if needs_preview {
-                            // Extract values we need
-                            let file_path = self.files[self.current_file_index].path.clone();
-                            let header_row = self.files[self.current_file_index].header_row;
-                            let delimiter = self.files[self.current_file_index].delimiter.clone();
-                            let sample_size = self.files[self.current_file_index].sample_size;
-                            
-                            // Check cache first
-                            if let Some(cached) = self.preview_cache.get(&file_path).cloned() {
-                                if let Some(file) = self.files.get_mut(self.current_file_index) {
-                                    file.preview_data = Some(cached.clone());
-                                    // Update columns if empty
-                                    if file.columns.is_empty() {
-                                        let data_rows: Vec<&Vec<String>> = cached.rows.iter().collect();
-                                        
-                                        for (i, col_name) in cached.headers.iter().enumerate() {
-                                            let inferred_type = infer_column_type(&data_rows, i);
-                                            let is_id_column = col_name.to_lowercase() == "id";
-                                            
-                                            let config = ColumnConfig {
-                                                name: col_name.clone(),
-                                                data_type: inferred_type,
-                                                include: true,
-                                                is_primary_key: false, // Don't set primary key by default
-                                                not_null: is_id_column,
-                                                unique: is_id_column,
-                                                create_index: false,
-                                            };
-                                            
-                                            file.columns.push(config);
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Load preview data
-                                if let Ok(preview) = self.load_preview_data(&file_path, header_row, &delimiter, sample_size) {
-                                    self.preview_cache.insert(file_path.clone(), preview.clone());
+                            // Extract values we need with bounds checking
+                            if let Some(file) = self.files.get(self.current_file_index) {
+                                let file_path = file.path.clone();
+                                let header_row = file.header_row;
+                                let delimiter = file.delimiter.clone();
+                                let sample_size = file.sample_size;
+                                
+                                // Check cache first
+                                if let Some(cached) = self.preview_cache.get(&file_path).cloned() {
                                     if let Some(file) = self.files.get_mut(self.current_file_index) {
-                                        file.preview_data = Some(preview.clone());
+                                        file.preview_data = Some(cached.clone());
                                         // Update columns if empty
                                         if file.columns.is_empty() {
-                                            let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
+                                            let data_rows: Vec<&Vec<String>> = cached.rows.iter().collect();
                                             
-                                            for (i, col_name) in preview.headers.iter().enumerate() {
+                                            for (i, col_name) in cached.headers.iter().enumerate() {
                                                 let inferred_type = infer_column_type(&data_rows, i);
                                                 let is_id_column = col_name.to_lowercase() == "id";
                                                 
@@ -467,6 +432,35 @@ impl FileConfigScreen {
                                                 };
                                                 
                                                 file.columns.push(config);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Load preview data
+                                    if let Ok(preview) = self.load_preview_data(&file_path, header_row, &delimiter, sample_size) {
+                                        self.preview_cache.insert(file_path.clone(), preview.clone());
+                                        if let Some(file) = self.files.get_mut(self.current_file_index) {
+                                            file.preview_data = Some(preview.clone());
+                                            // Update columns if empty
+                                            if file.columns.is_empty() {
+                                                let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
+                                                
+                                                for (i, col_name) in preview.headers.iter().enumerate() {
+                                                    let inferred_type = infer_column_type(&data_rows, i);
+                                                    let is_id_column = col_name.to_lowercase() == "id";
+                                                    
+                                                    let config = ColumnConfig {
+                                                        name: col_name.clone(),
+                                                        data_type: inferred_type,
+                                                        include: true,
+                                                        is_primary_key: false, // Don't set primary key by default
+                                                        not_null: is_id_column,
+                                                        unique: is_id_column,
+                                                        create_index: false,
+                                                    };
+                                                    
+                                                    file.columns.push(config);
+                                                }
                                             }
                                         }
                                     }
@@ -723,6 +717,7 @@ impl FileConfigScreen {
         if let Some(file) = self.files.get(self.current_file_index) {
             if let Some(preview) = &file.preview_data {
                 let available_height = ui.available_height();
+                let header_row = file.header_row;
                 
                 // Wrap table in unique ID scope
                 ui.scope(|ui| {
@@ -741,11 +736,17 @@ impl FileConfigScreen {
                                 }
                             })
                             .body(|mut body| {
-                                for (_idx, data_row) in preview.rows.iter().enumerate() {
+                                for (row_idx, data_row) in preview.rows.iter().enumerate() {
+                                    let is_header_row = row_idx == 0 && header_row == 1;
+                                    
                                     body.row(18.0, |mut row| {
                                         for cell in data_row.iter() {
                                             row.col(|ui| {
-                                                ui.label(cell);
+                                                if is_header_row {
+                                                    ui.label(RichText::new(cell).strong().color(Color32::from_rgb(120, 200, 255)));
+                                                } else {
+                                                    ui.label(cell);
+                                                }
                                             });
                                         }
                                     });
