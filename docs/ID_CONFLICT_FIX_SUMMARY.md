@@ -66,6 +66,18 @@ The ID conflicts were resolved by implementing comprehensive unique IDs for ALL 
    }
    ```
 
+### Final UI/UX Fixes
+
+9. **Fixed header row display**:
+   - Removed duplicate header row from data preview (was showing in both header and data)
+   - The preview data already excludes the header row when loading from file
+   - Headers are properly displayed only in the table header section
+
+10. **Fixed table height issue**:
+    - Limited preview table height to 300px maximum
+    - Ensures "Create Database" button remains visible and clickable
+    - Uses `ui.available_height().min(300.0)` for responsive sizing
+
 ### Why This Solution Works
 - Every widget has a unique ID based on its context (file index, row index, purpose)
 - Tables are wrapped in unique scopes preventing internal ScrollArea conflicts
@@ -73,6 +85,7 @@ The ID conflicts were resolved by implementing comprehensive unique IDs for ALL 
 - Using format strings with indices guarantees uniqueness
 - File switching is handled safely with proper bounds checking
 - Performance is optimized by reading only what's needed
+- UI is properly laid out with appropriate height constraints
 
 ## Result
 ✅ All egui ID conflict warnings are resolved
@@ -81,5 +94,7 @@ The ID conflicts were resolved by implementing comprehensive unique IDs for ALL 
 ✅ All functionality preserved
 ✅ No primary key is selected by default
 ✅ Performance significantly improved for large CSV files
+✅ Headers display properly without duplication
+✅ Create Database button is always visible and accessible
 
-The application now handles multiple CSV imports cleanly without any ID conflict warnings, crashes, or performance issues. 
+The application now handles multiple CSV imports cleanly without any ID conflict warnings, crashes, performance issues, or UI layout problems. 
