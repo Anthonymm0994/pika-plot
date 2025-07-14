@@ -193,17 +193,48 @@ impl CanvasPanel {
             }
         }
         
-        // Draw temporary connection line while creating
+        // Handle connection creation
         if let Some(from_id) = self.connecting_from {
+            // Draw temporary connection line
             if let Some(from_node) = state.get_canvas_node(from_id) {
                 let from_pos = to_screen(Pos2::new(from_node.position.x + from_node.size.x,
                                                    from_node.position.y + from_node.size.y / 2.0));
-                let to_pos = response.hover_pos().unwrap_or(from_pos);
+                let mouse_pos = response.hover_pos().unwrap_or(from_pos);
                 
+                // Draw temporary line to mouse
                 painter.line_segment(
-                    [from_pos, to_pos],
-                    Stroke::new(2.0, Color32::from_gray(150)),
+                    [from_pos, mouse_pos],
+                    Stroke::new(2.0, Color32::from_rgb(100, 150, 250).linear_multiply(0.5)),
                 );
+                
+                // Check if clicking on another node to complete connection
+                if response.clicked() {
+                    if let Some(to_node_id) = self.find_node_at_pos(state, from_screen(mouse_pos)) {
+                        if to_node_id != from_id {
+                            // Create connection
+                            state.add_connection(from_id, to_node_id, ConnectionType::DataFlow);
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    // Cancel connection creation
+                    self.connecting_from = None;
+                }
+                
+                // Cancel on right click or escape
+                if response.secondary_clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.connecting_from = None;
+                }
+            }
+        }
+        
+        // Double-click to create connections
+        if response.double_clicked() && self.connecting_from.is_none() {
+            if let Some(node_id) = state.selected_node {
+                if let Some(node) = state.get_canvas_node(node_id) {
+                    if let CanvasNodeType::Table { .. } = &node.node_type {
+                        self.connecting_from = Some(node_id);
+                    }
+                }
             }
         }
         
@@ -631,6 +662,29 @@ impl CanvasPanel {
                         self.create_plot_from_table(state, node_id, "Radar");
                         self.context_menu_pos = None;
                         ui.close_menu();
+                    }
+                    
+                    ui.separator();
+                    
+                    // Connection options for table nodes
+                    if let CanvasNodeType::Table { .. } = &node.node_type {
+                        if ui.button("Create Connection From Here").clicked() {
+                            self.connecting_from = Some(node_id);
+                            ui.close_menu();
+                        }
+                        
+                        ui.separator();
+                        
+                        // Create plot submenu
+                        ui.menu_button("Create Plot", |ui| {
+                            for plot_type in &["Line", "Bar", "Scatter", "Histogram", "Box", "Violin", 
+                                              "Heatmap", "Correlation", "Time Series", "Radar"] {
+                                if ui.button(*plot_type).clicked() {
+                                    self.create_plot_from_table(state, node_id, plot_type);
+                                    ui.close_menu();
+                                }
+                            }
+                        });
                     }
                 }
                 _ => {
