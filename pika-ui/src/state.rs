@@ -90,7 +90,7 @@ pub enum CanvasNodeType {
     Shape { shape_type: ShapeType },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShapeType {
     Rectangle,
     Circle,

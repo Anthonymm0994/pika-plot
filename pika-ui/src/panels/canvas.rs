@@ -7,11 +7,30 @@ use egui::{Context, Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Se
 use crate::panels::canvas_panel::AppEvent;
 use egui_extras::{TableBuilder, Column};
 
+const RESIZE_HANDLE_SIZE: f32 = 8.0;
+const MIN_NODE_SIZE: f32 = 50.0;
+const DEFAULT_TABLE_SIZE: Vec2 = Vec2::new(400.0, 300.0);
+const DEFAULT_PLOT_SIZE: Vec2 = Vec2::new(350.0, 250.0);
+const DEFAULT_SHAPE_SIZE: Vec2 = Vec2::new(150.0, 100.0);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ResizeHandle {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
 /// Canvas panel for node-based visualization.
 pub struct CanvasPanel {
     /// Dragging state
     dragging_node: Option<NodeId>,
     drag_offset: Vec2,
+    
+    /// Resizing state
+    resizing_node: Option<(NodeId, ResizeHandle)>,
+    resize_start_size: Vec2,
+    resize_start_pos: Vec2,
     
     /// Connection creation state
     connecting_from: Option<NodeId>,
@@ -36,6 +55,9 @@ impl CanvasPanel {
         Self {
             dragging_node: None,
             drag_offset: Vec2::ZERO,
+            resizing_node: None,
+            resize_start_size: Vec2::ZERO,
+            resize_start_pos: Vec2::ZERO,
             connecting_from: None,
             pan_offset: Vec2::ZERO,
             zoom: 1.0,
@@ -149,15 +171,7 @@ impl CanvasPanel {
             }
         }
         
-        // Draw canvas nodes
-        let nodes: Vec<_> = state.canvas_nodes.keys().cloned().collect();
-        for node_id in nodes {
-            if let Some(node) = state.get_canvas_node(node_id) {
-                self.draw_node(&painter, node, to_screen, state.selected_node == Some(node_id), state);
-            }
-        }
-        
-        // Tool-specific handling
+        // Tool-specific handling BEFORE drawing nodes so preview shapes appear immediately
         match state.tool_mode {
             ToolMode::Select => self.handle_select_tool(&response, state, from_screen, to_screen, event_tx),
             ToolMode::Pan => {
@@ -168,6 +182,20 @@ impl CanvasPanel {
             ToolMode::Line => self.handle_line_tool(&response, state, from_screen),
             ToolMode::Draw => self.handle_draw_tool(&response, state, from_screen, &painter, to_screen),
             ToolMode::Text => self.handle_text_tool(&response, state, from_screen),
+        }
+        
+        // Draw canvas nodes AFTER tool handling so preview shapes are visible
+        let nodes: Vec<_> = state.canvas_nodes.keys().cloned().collect();
+        for node_id in nodes {
+            if let Some(node) = state.get_canvas_node(node_id) {
+                let is_selected = state.selected_node == Some(node_id);
+                self.draw_node(&painter, node, to_screen, is_selected, state);
+                
+                // Draw resize handles for selected nodes
+                if is_selected && state.tool_mode == ToolMode::Select {
+                    self.draw_resize_handles(&painter, node, to_screen);
+                }
+            }
         }
         
         // Handle right-click context menu
@@ -252,42 +280,85 @@ impl CanvasPanel {
         }
     }
     
-    fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, _to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
-        if response.clicked() {
-            let click_pos = response.hover_pos().unwrap();
-            let canvas_pos = from_screen(click_pos);
-            
-            // Check if we clicked on a node
-            let mut clicked_node = None;
-            for (id, node) in &state.canvas_nodes {
-                let node_rect = Rect::from_min_size(
-                    Pos2::new(node.position.x, node.position.y),
-                    node.size
-                );
-                if node_rect.contains(canvas_pos) {
-                    clicked_node = Some(*id);
-                    state.selected_node = Some(*id);
-                    // Set up dragging state
-                    self.dragging_node = Some(*id);
-                    self.drag_offset = Pos2::new(node.position.x, node.position.y) - canvas_pos;
-                    let _ = event_tx.send(AppEvent::NodeSelected(*id));
-                    break;
+    fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
+        if response.drag_started() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let canvas_pos = from_screen(pos);
+                
+                // First check if clicking on a resize handle of selected node
+                if let Some(selected_id) = state.selected_node {
+                    if let Some(node) = state.get_canvas_node(selected_id) {
+                        if let Some(handle) = self.get_resize_handle_at_pos(node, canvas_pos, to_screen) {
+                            self.resizing_node = Some((selected_id, handle));
+                            self.resize_start_size = node.size;
+                            self.resize_start_pos = node.position;
+                            return;
+                        }
+                    }
                 }
-            }
-            
-            // Clear selection if clicked on empty space
-            if response.clicked() && self.dragging_node.is_none() {
-                state.selected_node = None;
+                
+                // Then check if clicking on a node
+                for (id, node) in &state.canvas_nodes {
+                    let node_rect = Rect::from_min_size(
+                        Pos2::new(node.position.x, node.position.y),
+                        node.size,
+                    );
+                    
+                    if node_rect.contains(canvas_pos) {
+                        self.dragging_node = Some(*id);
+                        self.drag_offset = canvas_pos.to_vec2() - node.position;
+                        state.selected_node = Some(*id);
+                        let _ = event_tx.send(AppEvent::NodeSelected(*id));
+                        break;
+                    }
+                }
+                
+                // If clicking on empty space, deselect
+                if self.dragging_node.is_none() && self.resizing_node.is_none() {
+                    state.selected_node = None;
+                }
             }
         }
         
-        // Handle node dragging
-        if response.dragged() && self.dragging_node.is_some() {
+        if response.dragged() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let canvas_pos = from_screen(pos);
-                if let Some(node_id) = self.dragging_node {
+                
+                // Handle node resizing
+                if let Some((node_id, handle)) = self.resizing_node {
                     if let Some(node) = state.get_canvas_node_mut(node_id) {
-                        node.position = (canvas_pos + self.drag_offset).to_vec2();
+                        match handle {
+                            ResizeHandle::TopLeft => {
+                                let new_size = self.resize_start_size - Vec2::new(canvas_pos.x - self.resize_start_pos.x, canvas_pos.y - self.resize_start_pos.y);
+                                node.size = Vec2::new(new_size.x.max(MIN_NODE_SIZE), new_size.y.max(MIN_NODE_SIZE));
+                                node.position = Vec2::new(
+                                    self.resize_start_pos.x + (self.resize_start_size.x - node.size.x),
+                                    self.resize_start_pos.y + (self.resize_start_size.y - node.size.y)
+                                );
+                            }
+                            ResizeHandle::TopRight => {
+                                let new_width = canvas_pos.x - node.position.x;
+                                let new_height = self.resize_start_size.y - (canvas_pos.y - self.resize_start_pos.y);
+                                node.size = Vec2::new(new_width.max(MIN_NODE_SIZE), new_height.max(MIN_NODE_SIZE));
+                                node.position.y = self.resize_start_pos.y + (self.resize_start_size.y - node.size.y);
+                            }
+                            ResizeHandle::BottomLeft => {
+                                let new_width = self.resize_start_size.x - (canvas_pos.x - self.resize_start_pos.x);
+                                let new_height = canvas_pos.y - node.position.y;
+                                node.size = Vec2::new(new_width.max(MIN_NODE_SIZE), new_height.max(MIN_NODE_SIZE));
+                                node.position.x = self.resize_start_pos.x + (self.resize_start_size.x - node.size.x);
+                            }
+                            ResizeHandle::BottomRight => {
+                                let new_size = canvas_pos.to_vec2() - node.position;
+                                node.size = Vec2::new(new_size.x.max(MIN_NODE_SIZE), new_size.y.max(MIN_NODE_SIZE));
+                            }
+                        }
+                    }
+                }
+                // Handle node dragging
+                else if let Some(node_id) = self.dragging_node {
+                    if let Some(node) = state.get_canvas_node_mut(node_id) {
+                        node.position = canvas_pos.to_vec2() - self.drag_offset;
                         let _ = event_tx.send(AppEvent::NodeMoved { 
                             id: node_id, 
                             position: node.position 
@@ -298,45 +369,72 @@ impl CanvasPanel {
         }
         
         if response.drag_stopped() {
-                self.dragging_node = None;
+            self.dragging_node = None;
+            self.resizing_node = None;
+        }
+        
+        // Double-click to create connections
+        if response.double_clicked() {
+            if let Some(node_id) = state.selected_node {
+                if let Some(node) = state.get_canvas_node(node_id) {
+                    if let CanvasNodeType::Table { .. } = &node.node_type {
+                        self.connecting_from = Some(node_id);
+                    }
+                }
+            }
         }
     }
     
     fn handle_shape_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, shape_type: ShapeType) {
-        if response.clicked() {
+        if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos() {
                 self.drawing_start = Some(from_screen(pos));
-                // Create preview shape
+                // Create preview shape immediately
                 let id = NodeId::new();
                 self.preview_shape = Some(id);
+                
+                // Add initial shape at mouse position
+                let start_pos = from_screen(pos);
+                let canvas_node = CanvasNode {
+                    id,
+                    position: start_pos.to_vec2(),
+                    size: Vec2::new(1.0, 1.0), // Start with minimal size
+                    node_type: CanvasNodeType::Shape { shape_type },
+                };
+                state.canvas_nodes.insert(id, canvas_node);
             }
         }
         
-        if response.dragged() {
-            if let (Some(start_pos), Some(shape_id)) = (self.drawing_start, self.preview_shape) {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    let end_pos = from_screen(pos);
-                    let size = (end_pos - start_pos).abs();
-                    
-                    if size.x > 5.0 && size.y > 5.0 {
-                        let canvas_node = CanvasNode {
-                            id: shape_id,
-                            position: start_pos.to_vec2().min(end_pos.to_vec2()),
-                            size,
-                            node_type: CanvasNodeType::Shape { shape_type },
-                        };
-                        
-                        // Update the preview shape
-                        state.canvas_nodes.insert(shape_id, canvas_node);
-                    } else {
+        // Update shape during drag (including hover)
+        if let (Some(start_pos), Some(shape_id)) = (self.drawing_start, self.preview_shape) {
+            if let Some(pos) = response.hover_pos() {
+                let end_pos = from_screen(pos);
+                let size = (end_pos - start_pos).abs();
+                
+                // Always update the shape, even for small sizes
+                let canvas_node = CanvasNode {
+                    id: shape_id,
+                    position: start_pos.to_vec2().min(end_pos.to_vec2()),
+                    size: size.max(Vec2::new(1.0, 1.0)), // Ensure minimum size
+                    node_type: CanvasNodeType::Shape { shape_type },
+                };
+                
+                // Update the preview shape
+                state.canvas_nodes.insert(shape_id, canvas_node);
+            }
+        }
+        
+        if response.drag_stopped() {
+            // Finalize the shape or remove if too small
+            if let Some(shape_id) = self.preview_shape {
+                if let Some(node) = state.get_canvas_node(shape_id) {
+                    if node.size.x < 5.0 || node.size.y < 5.0 {
                         // Remove shape if too small
                         state.canvas_nodes.remove(&shape_id);
                     }
                 }
             }
-        }
-        
-        if response.drag_stopped() {
+            
             self.drawing_start = None;
             self.preview_shape = None;
         }
@@ -520,7 +618,7 @@ impl CanvasPanel {
             let canvas_node = CanvasNode {
                 id,
                 position: pos.to_vec2(),
-                size: Vec2::new(150.0, 100.0),
+                size: Vec2::new(200.0, 150.0),
                 node_type: CanvasNodeType::Note { content: "New note".to_string() },
             };
             state.canvas_nodes.insert(id, canvas_node);
@@ -536,7 +634,7 @@ impl CanvasPanel {
                 let canvas_node = CanvasNode {
                     id,
                     position: pos.to_vec2(),
-                    size: Vec2::new(100.0, 60.0),
+                    size: DEFAULT_SHAPE_SIZE,
                     node_type: CanvasNodeType::Shape { shape_type: ShapeType::Rectangle },
                 };
                 state.canvas_nodes.insert(id, canvas_node);
@@ -548,7 +646,7 @@ impl CanvasPanel {
                 let canvas_node = CanvasNode {
                     id,
                     position: pos.to_vec2(),
-                    size: Vec2::new(80.0, 80.0),
+                    size: Vec2::new(120.0, 120.0),
                     node_type: CanvasNodeType::Shape { shape_type: ShapeType::Circle },
                 };
                 state.canvas_nodes.insert(id, canvas_node);
@@ -571,7 +669,7 @@ impl CanvasPanel {
                         let canvas_node = CanvasNode {
                             id: node_id,
                             position: pos.to_vec2(),
-                            size: Vec2::new(200.0, 150.0),
+                            size: DEFAULT_TABLE_SIZE,
                             node_type: CanvasNodeType::Table { 
                                 table_info: table_info.clone()
                             },
@@ -598,8 +696,8 @@ impl CanvasPanel {
             
             let plot_node = CanvasNode {
                 id: plot_id,
-                position: table_node.position + Vec2::new(250.0, offset_y),
-                size: Vec2::new(200.0, 150.0),
+                position: table_node.position + Vec2::new(450.0, offset_y),
+                size: DEFAULT_PLOT_SIZE,
                 node_type: CanvasNodeType::Plot { plot_type: plot_type.to_string() },
             };
             state.canvas_nodes.insert(plot_id, plot_node);
@@ -641,13 +739,59 @@ impl CanvasPanel {
                     Color32::WHITE,
                 );
                 
-                // Data preview area (always visible)
-                let data_rect = Rect::from_min_size(
+                // Query editor area
+                let query_height = 60.0;
+                let query_rect = Rect::from_min_size(
                     rect.min + Vec2::new(5.0, 35.0),
-                    Vec2::new(rect.width() - 10.0, rect.height() - 40.0),
+                    Vec2::new(rect.width() - 10.0, query_height),
                 );
                 
-                painter.rect_filled(data_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                painter.rect_filled(query_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                
+                // Draw query text
+                if let Some(query) = state.node_queries.get(&node.id) {
+                    painter.text(
+                        query_rect.min + Vec2::new(5.0, 5.0),
+                        egui::Align2::LEFT_TOP,
+                        query,
+                        FontId::monospace(12.0 * self.zoom),
+                        Color32::from_gray(200),
+                    );
+                    
+                    // Show cursor if selected
+                    if selected {
+                        let cursor_pos = query_rect.min + Vec2::new(5.0 + query.len() as f32 * 7.0, 5.0);
+                        painter.line_segment(
+                            [cursor_pos, cursor_pos + Vec2::new(0.0, 14.0)],
+                            Stroke::new(1.0, Color32::WHITE),
+                        );
+                    }
+                } else {
+                    painter.text(
+                        query_rect.min + Vec2::new(5.0, 5.0),
+                        egui::Align2::LEFT_TOP,
+                        "SELECT * FROM table LIMIT 10",
+                        FontId::monospace(12.0 * self.zoom),
+                        Color32::from_gray(120),
+                    );
+                }
+                
+                // Hint text
+                painter.text(
+                    query_rect.max - Vec2::new(5.0, 5.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    "Ctrl+Enter to run",
+                    FontId::proportional(10.0 * self.zoom),
+                    Color32::from_gray(100),
+                );
+                
+                // Data preview area (below query)
+                let data_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(5.0, 100.0),
+                    Vec2::new(rect.width() - 10.0, rect.height() - 105.0),
+                );
+                
+                painter.rect_filled(data_rect, 2.0, Color32::from_rgb(20, 20, 30));
                 
                 // Get or create preview data
                 if let Some(preview) = state.node_data.get(&node.id) {
@@ -836,7 +980,12 @@ impl CanvasPanel {
             }
             CanvasNodeType::Shape { shape_type } => {
                 // Draw shapes
-                let stroke = Stroke::new(2.0, if selected { Color32::from_rgb(150, 150, 250) } else { Color32::from_gray(150) });
+                let shape_color = if self.preview_shape == Some(node.id) {
+                    Color32::from_gray(100) // Lighter color for preview
+                } else {
+                    Color32::from_gray(150)
+                };
+                let stroke = Stroke::new(2.0, shape_color);
                 
                 match shape_type {
                     ShapeType::Rectangle => {
@@ -855,6 +1004,15 @@ impl CanvasPanel {
                         let end = to_screen(Pos2::new(node.position.x + end.x, node.position.y + end.y));
                         painter.arrow(start, end - start, stroke);
                     }
+                }
+                
+                // Draw selection box for shapes
+                if selected {
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0, Color32::from_rgb(100, 150, 250)),
+                    );
                 }
             }
         }
@@ -905,5 +1063,45 @@ impl CanvasPanel {
             points.push(Pos2::new(x, y));
         }
         points
+    }
+    
+    fn get_resize_handle_at_pos(&self, node: &CanvasNode, pos: Pos2, to_screen: impl Fn(Pos2) -> Pos2) -> Option<ResizeHandle> {
+        let handles = [
+            (ResizeHandle::TopLeft, Pos2::new(node.position.x, node.position.y)),
+            (ResizeHandle::TopRight, Pos2::new(node.position.x + node.size.x, node.position.y)),
+            (ResizeHandle::BottomLeft, Pos2::new(node.position.x, node.position.y + node.size.y)),
+            (ResizeHandle::BottomRight, Pos2::new(node.position.x + node.size.x, node.position.y + node.size.y)),
+        ];
+        
+        for (handle, handle_pos) in handles {
+            let dist = (pos.to_vec2() - handle_pos.to_vec2()).length();
+            if dist <= RESIZE_HANDLE_SIZE {
+                return Some(handle);
+            }
+        }
+        None
+    }
+    
+    fn draw_resize_handles(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2) {
+        let handles = [
+            Pos2::new(node.position.x, node.position.y),
+            Pos2::new(node.position.x + node.size.x, node.position.y),
+            Pos2::new(node.position.x, node.position.y + node.size.y),
+            Pos2::new(node.position.x + node.size.x, node.position.y + node.size.y),
+        ];
+        
+        for handle_pos in handles {
+            let screen_pos = to_screen(handle_pos);
+            painter.circle_filled(
+                screen_pos,
+                RESIZE_HANDLE_SIZE / 2.0,
+                Color32::from_rgb(100, 150, 250),
+            );
+            painter.circle_stroke(
+                screen_pos,
+                RESIZE_HANDLE_SIZE / 2.0,
+                Stroke::new(1.0, Color32::WHITE),
+            );
+        }
     }
 }
