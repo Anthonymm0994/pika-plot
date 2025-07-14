@@ -23,11 +23,6 @@ dunce = { workspace = true }
 # Basic CSV processing instead of duckdb/polars for now
 csv = { workspace = true }
 
-# UI types (needed for egui types in traits)
-egui = { workspace = true }
-wgpu = { workspace = true }
-bytemuck = { workspace = true }
-
 # System information
 num_cpus = "1.0"
 
