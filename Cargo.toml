@@ -23,12 +23,15 @@ duckdb = "0.10.0"
 polars = { version = "0.40.0", features = ["lazy", "csv"] }
 arrow = "50.0.0"
 
-# Neural network dependencies under feature flag
-# In individual crates, we can enable via features later
+# Neural network dependencies (optional for advanced feature)
+burn = { version = "0.13", optional = true }
+candle-core = { version = "0.6", optional = true }
+
+# Pinned utilities
+rand = "0.8.5"
 
 # Update existing deps if needed
 chrono = "0.4.34"
-rand = "0.8.5"  // Default rand version
 
 # Core utilities - stable versions
 tokio = { version = "1.35", features = ["full"] }
