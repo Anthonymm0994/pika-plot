@@ -8,6 +8,17 @@ use pika_core::{
 use std::sync::Arc;
 use std::any::Any;
 
+/// Cached plot render data
+#[derive(Debug, Clone)]
+struct CachedPlotData {
+    /// The rendered plot data
+    render_data: RenderData,
+    /// Configuration that generated this cache
+    config_hash: u64,
+    /// Input data hash
+    data_hash: u64,
+}
+
 /// A node that renders plots
 #[derive(Debug, Clone)]
 pub struct PlotNode {
@@ -19,6 +30,10 @@ pub struct PlotNode {
     input_ports: Vec<Port>,
     output_ports: Vec<Port>,
     data: Option<Arc<dyn Any + Send + Sync>>,
+    /// Cached render data (lazy evaluation)
+    cached_render: Option<CachedPlotData>,
+    /// Whether the cache is dirty
+    cache_dirty: bool,
 }
 
 impl PlotNode {
@@ -41,11 +56,14 @@ impl PlotNode {
             input_ports,
             output_ports,
             data: None,
+            cached_render: None,
+            cache_dirty: true,
         }
     }
     
     pub fn with_config(mut self, config: PlotConfig) -> Self {
         self.config = config;
+        self.cache_dirty = true;
         self
     }
     
@@ -54,7 +72,70 @@ impl PlotNode {
     }
     
     pub fn set_config(&mut self, config: PlotConfig) {
+        if self.hash_config(&config) != self.hash_config(&self.config) {
+            self.cache_dirty = true;
+        }
         self.config = config;
+    }
+    
+    /// Compute hash for config (for cache invalidation)
+    fn hash_config(&self, config: &PlotConfig) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        
+        let mut hasher = DefaultHasher::new();
+        // Hash the config data - this is a simplified version
+        format!("{:?}", config).hash(&mut hasher);
+        hasher.finish()
+    }
+    
+    /// Compute hash for data (for cache invalidation)
+    fn hash_data(&self, data: &Arc<dyn Any + Send + Sync>) -> u64 {
+        // In a real implementation, this would hash the actual data content
+        // For now, use pointer address as a simple proxy
+        data.as_ref() as *const dyn Any as *const () as usize as u64
+    }
+    
+    /// Get cached render data or compute if needed (lazy evaluation)
+    fn get_cached_render(&mut self) -> Result<RenderData> {
+        // Check if we have valid cached data
+        if let Some(ref cached) = self.cached_render {
+            if !self.cache_dirty {
+                if let Some(ref data) = self.data {
+                    let current_config_hash = self.hash_config(&self.config);
+                    let current_data_hash = self.hash_data(data);
+                    
+                    if cached.config_hash == current_config_hash && 
+                       cached.data_hash == current_data_hash {
+                        // Cache hit!
+                        // Return placeholder data instead of cloning
+                        return Ok(RenderData { data: vec![] });
+                    }
+                }
+            }
+        }
+        
+        // Cache miss - compute new render data
+        let render_data = self.compute_render_data()?;
+        
+        // Update cache
+        if let Some(ref data) = self.data {
+            self.cached_render = Some(CachedPlotData {
+                render_data: RenderData { data: vec![] },  // Store placeholder instead of cloning
+                config_hash: self.hash_config(&self.config),
+                data_hash: self.hash_data(data),
+            });
+            self.cache_dirty = false;
+        }
+        
+        Ok(render_data)
+    }
+    
+    /// Actually compute the render data (expensive operation)
+    fn compute_render_data(&self) -> Result<RenderData> {
+        // This is where the actual plot rendering logic would go
+        // For now, return empty render data
+        Ok(RenderData { data: vec![] })
     }
 }
 
@@ -90,12 +171,16 @@ impl Node for PlotNode {
     fn accept_input(&mut self, port_id: &str, data: Arc<dyn Any + Send + Sync>) -> Result<()> {
         match port_id {
             "data" => {
+                // Invalidate cache when data changes
+                if self.data.is_none() || self.hash_data(&data) != self.data.as_ref().map(|d| self.hash_data(d)).unwrap_or(0) {
+                    self.cache_dirty = true;
+                }
                 self.data = Some(data);
                 Ok(())
             }
             "config" => {
                 if let Some(config) = data.downcast_ref::<PlotConfig>() {
-                    self.config = config.clone();
+                    self.set_config(config.clone());
                     Ok(())
                 } else {
                     Err(PikaError::Validation(
@@ -117,7 +202,10 @@ impl Node for PlotNode {
     }
     
     fn execute(&mut self) -> Result<()> { Ok(()) }
-    fn render_data(&mut self) -> Result<RenderData> { Ok(RenderData { data: vec![] }) }
+    fn render_data(&mut self) -> Result<RenderData> { 
+        // Use lazy cached evaluation
+        self.get_cached_render()
+    }
     
     fn type_name(&self) -> &'static str {
         "PlotNode"

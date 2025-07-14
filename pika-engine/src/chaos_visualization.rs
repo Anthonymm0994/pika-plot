@@ -582,6 +582,7 @@ impl ChaosVisualizationEngine {
             }
         }
         
+        let memory_usage = image_data.len() as u64;
         Ok(ChaosVisualizationOutput {
             id: config.id.clone(),
             image_data,
@@ -589,7 +590,7 @@ impl ChaosVisualizationEngine {
             metadata: VisualizationMetadata {
                 generation_time: 0.0,
                 computation_time: 0.0,
-                memory_usage: image_data.len() as u64,
+                memory_usage,
                 point_count: 10000,
                 convergence_info: ConvergenceInfo {
                     converged: true,
@@ -638,6 +639,7 @@ impl ChaosVisualizationEngine {
             }
         }
         
+        let memory_usage = image_data.len() as u64;
         Ok(ChaosVisualizationOutput {
             id: config.id.clone(),
             image_data,
@@ -645,7 +647,7 @@ impl ChaosVisualizationEngine {
             metadata: VisualizationMetadata {
                 generation_time: 0.0,
                 computation_time: 0.0,
-                memory_usage: image_data.len() as u64,
+                memory_usage,
                 point_count: 10000,
                 convergence_info: ConvergenceInfo {
                     converged: true,
@@ -1227,7 +1229,7 @@ impl ChaosVisualizationEngine {
             }
             
             // Draw spectrum
-            let max_power = spectrum.iter().fold(0.0, |acc, &x| acc.max(x));
+            let max_power = spectrum.iter().fold(0.0f64, |acc, &x| acc.max(x));
             
             for (i, &power) in spectrum.iter().enumerate() {
                 let bar_height = (power / max_power) * height as f64;
@@ -1302,7 +1304,7 @@ impl ChaosVisualizationEngine {
             }
             
             // Find maximum density for normalization
-            let max_density = density_map.iter().flatten().fold(0.0, |acc, &x| acc.max(x));
+            let max_density = density_map.iter().flatten().fold(0.0f64, |acc, &x| acc.max(x));
             
             // Render heatmap
             for y in 0..height {

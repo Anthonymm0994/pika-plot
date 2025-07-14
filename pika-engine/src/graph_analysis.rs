@@ -292,16 +292,16 @@ impl GraphAnalysisEngine {
             GraphAnalysisType::ModularityOptimization => {
                 self.modularity_optimization()?
             },
-            GraphAnalysisType::ShortestPaths { source } => {
+            GraphAnalysisType::ShortestPaths { ref source } => {
                 self.shortest_paths_from_source(&source)?
             },
             GraphAnalysisType::AllPairsShortestPaths => {
                 self.all_pairs_shortest_paths()?
             },
-            GraphAnalysisType::DijkstraShortestPath { source, target } => {
+            GraphAnalysisType::DijkstraShortestPath { ref source, ref target } => {
                 self.dijkstra_shortest_path(&source, &target)?
             },
-            GraphAnalysisType::BellmanFordShortestPath { source } => {
+            GraphAnalysisType::BellmanFordShortestPath { ref source } => {
                 self.bellman_ford_shortest_path(&source)?
             },
             GraphAnalysisType::FloydWarshallShortestPath => {
@@ -340,10 +340,10 @@ impl GraphAnalysisEngine {
             GraphAnalysisType::SmallWorldness => {
                 self.small_worldness()?
             },
-            GraphAnalysisType::MaximumFlow { source, sink } => {
+            GraphAnalysisType::MaximumFlow { ref source, ref sink } => {
                 self.maximum_flow(&source, &sink)?
             },
-            GraphAnalysisType::MinimumCut { source, sink } => {
+            GraphAnalysisType::MinimumCut { ref source, ref sink } => {
                 self.minimum_cut(&source, &sink)?
             },
             GraphAnalysisType::NetworkMotifs => {
@@ -1156,7 +1156,7 @@ impl GraphAnalysisEngine {
         
         for source in self.graph.nodes.keys() {
             let distances = self.single_source_shortest_path(source)?;
-            let eccentricity = distances.values().fold(0.0, |acc, &d| acc.max(d));
+            let eccentricity = distances.values().fold(0.0f64, |acc, &d| acc.max(d));
             eccentricities.push(eccentricity);
         }
 
@@ -1421,7 +1421,7 @@ impl GraphAnalysisEngine {
         
         for node_id in self.graph.nodes.keys() {
             // Simulate evolution with random values
-            evolution_scores.insert(node_id.clone(), rand::random::<f64>());
+            evolution_scores.insert(node_id.clone(), 0.5); // Placeholder for rand::random()
         }
 
         Ok(AnalysisData::NodeScores(evolution_scores))
@@ -1519,12 +1519,13 @@ impl GraphAnalysisEngine {
         path_nodes.push(source.clone());
         path_nodes.reverse();
         
+        let path_length = path_nodes.len() as f64 - 1.0;
         Ok(Path {
             source: source.clone(),
             target: target.clone(),
             nodes: path_nodes,
             edges: Vec::new(),
-            length: path_nodes.len() as f64 - 1.0,
+            length: path_length,
             weight: *distances.get(target).unwrap_or(&f64::INFINITY),
         })
     }

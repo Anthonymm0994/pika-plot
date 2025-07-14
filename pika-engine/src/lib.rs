@@ -1,37 +1,33 @@
-//! Pika plotting engine for data processing and visualization.
+//! Engine module for data processing and visualization.
 
-pub mod error;
-pub mod import;
-pub mod enhanced_csv;
+#![warn(missing_docs)]
+
 pub mod cache;
+pub mod plot_aggregation;
+pub mod enhanced_csv;
 pub mod query;
-pub mod streaming;
-pub mod workspace;
-
-// TEMPORARILY DISABLED - These modules have heavy dependencies (polars/duckdb/arrow)
-// We'll re-enable them once we resolve the dependency conflicts
-/*
-pub mod aggregation;
-pub mod analysis;
 pub mod database;
-pub mod streaming_processor; 
-pub mod memory_coordinator;
-pub mod plot;
-pub mod gpu;
-pub mod spatial_indexing;
-pub mod collaboration;
-pub mod feature_engineering;
-pub mod neural_networks;
-pub mod predictive_analytics;
-pub mod advanced_ml;
-pub mod automated_insights;
-pub mod advanced_visualization;
-pub mod graph_analysis;
-pub mod chaos_visualization;
-pub mod jupyter_integration;
-pub mod gpu_acceleration;
+pub mod workspace;
+pub mod import;
 pub mod memory;
-*/
+// pub mod memory_coordinator;  // Disabled: requires polars
+pub mod streaming;
+// pub mod analysis;  // Disabled: requires arrow/rstats
+pub mod aggregation;
+// pub mod feature_engineering;  // Disabled: requires polars/smartcore
+// pub mod advanced_ml;  // Disabled: requires polars/smartcore
+pub mod spatial_indexing;
+pub mod graph_analysis;
+// pub mod jupyter_integration;  // Disabled: requires jupyter_protocol/evcxr
+// pub mod collaboration;  // Disabled: requires y_octo/loro
+// pub mod automated_insights;  // Disabled: requires polars
+// pub mod predictive_analytics;  // Disabled: requires polars/smartcore
+// pub mod neural_networks;  // Disabled: requires burn
+// pub mod chaos_visualization;  // Disabled: borrow checker issues
+// pub mod advanced_visualization;  // Disabled: requires polars/charming
+// pub mod gpu_acceleration;  // Disabled: requires wgpu
+// pub mod gpu;  // Disabled: requires wgpu
+pub mod error;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;

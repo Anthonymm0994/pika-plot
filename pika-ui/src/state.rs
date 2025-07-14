@@ -115,6 +115,17 @@ pub struct AppState {
     pub canvas_state: CanvasState,
     pub tables: Vec<TableInfo>, // Convenience alias for data sources
     pub canvas_nodes: HashMap<NodeId, CanvasNode>,
+    /// Query text for each table node
+    pub node_queries: HashMap<NodeId, String>,
+    /// Data preview for each node
+    pub node_data: HashMap<NodeId, NodeDataPreview>,
+}
+
+/// Data preview for canvas nodes
+#[derive(Debug, Clone)]
+pub struct NodeDataPreview {
+    pub headers: Option<Vec<String>>,
+    pub rows: Option<Vec<Vec<String>>>,
 }
 
 impl AppState {
@@ -134,6 +145,8 @@ impl AppState {
             canvas_state: CanvasState::default(),
             tables: vec![],
             canvas_nodes: HashMap::new(),
+            node_queries: HashMap::new(),
+            node_data: HashMap::new(),
         }
     }
 
@@ -155,14 +168,8 @@ impl AppState {
         };
         self.data_nodes.push(node);
         
-        // Also add canvas node
-        let canvas_node = CanvasNode {
-            id: node_id,
-            position: egui::Vec2::new(100.0, 100.0),
-            size: egui::Vec2::new(200.0, 150.0),
-            node_type: CanvasNodeType::Table { table_info: table },
-        };
-        self.canvas_nodes.insert(node_id, canvas_node);
+        // Don't automatically add to canvas - let user decide when to add
+        // Canvas nodes will be created when user clicks the green + button
         
         self.update_tables();
         node_id

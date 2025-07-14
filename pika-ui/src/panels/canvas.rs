@@ -1,6 +1,6 @@
 //! Canvas panel for node-based data visualization.
 
-use crate::state::{AppState, NodeConnection, ConnectionType, CanvasNode, CanvasNodeType, ShapeType, ToolMode};
+use crate::state::{AppState, NodeConnection, ConnectionType, CanvasNode, CanvasNodeType, ShapeType, ToolMode, NodeDataPreview};
 use pika_core::types::NodeId;
 use tokio::sync::broadcast::Sender;
 use egui::{Context, Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, menu};
@@ -142,7 +142,7 @@ impl CanvasPanel {
         let nodes: Vec<_> = state.canvas_nodes.keys().cloned().collect();
         for node_id in nodes {
             if let Some(node) = state.get_canvas_node(node_id) {
-                self.draw_node(&painter, node, to_screen, state.selected_node == Some(node_id));
+                self.draw_node(&painter, node, to_screen, state.selected_node == Some(node_id), state);
             }
         }
         
@@ -209,15 +209,18 @@ impl CanvasPanel {
             let canvas_pos = from_screen(click_pos);
             
             // Check if we clicked on a node
-            let mut _clicked_node = None;
+            let mut clicked_node = None;
             for (id, node) in &state.canvas_nodes {
                 let node_rect = Rect::from_min_size(
                     Pos2::new(node.position.x, node.position.y),
                     node.size
                 );
                 if node_rect.contains(canvas_pos) {
-                    _clicked_node = Some(*id);
-                state.selected_node = Some(*id);
+                    clicked_node = Some(*id);
+                    state.selected_node = Some(*id);
+                    // Set up dragging state
+                    self.dragging_node = Some(*id);
+                    self.drag_offset = Pos2::new(node.position.x, node.position.y) - canvas_pos;
                     let _ = event_tx.send(AppEvent::NodeSelected(*id));
                     break;
                 }
@@ -358,6 +361,13 @@ impl CanvasPanel {
         if let Some(node) = state.get_canvas_node(node_id) {
             match &node.node_type {
                 CanvasNodeType::Table { .. } => {
+                    if ui.button("🔍 Query Data").clicked() {
+                        // TODO: Open query dialog
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    
+                    ui.separator();
                     ui.label("Create Plot:");
                     ui.separator();
                     
@@ -425,9 +435,16 @@ impl CanvasPanel {
     fn create_plot_from_table(&self, state: &mut AppState, table_id: NodeId, plot_type: &str) {
         if let Some(table_node) = state.get_canvas_node(table_id) {
             let plot_id = NodeId::new();
+            
+            // Count existing plots connected to this table to offset position
+            let existing_plots = state.connections.iter()
+                .filter(|conn| conn.from == table_id)
+                .count();
+            let offset_y = (existing_plots as f32) * 30.0;
+            
             let plot_node = CanvasNode {
                 id: plot_id,
-                position: table_node.position + Vec2::new(250.0, 0.0),
+                position: table_node.position + Vec2::new(250.0, offset_y),
                 size: Vec2::new(200.0, 150.0),
                 node_type: CanvasNodeType::Plot { plot_type: plot_type.to_string() },
             };
@@ -438,7 +455,7 @@ impl CanvasPanel {
         }
     }
     
-    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, selected: bool) {
+    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, selected: bool, state: &AppState) {
         let rect = Rect::from_min_size(
             to_screen(Pos2::new(node.position.x, node.position.y)),
             node.size
@@ -467,27 +484,85 @@ impl CanvasPanel {
                     Color32::WHITE,
                 );
                 
-                // Mini data preview (placeholder)
-                let preview_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(5.0, 30.0 * self.zoom),
-                    Vec2::new(rect.width() - 10.0, rect.height() - 35.0 * self.zoom),
-                );
-                painter.rect_filled(preview_rect, 2.0, Color32::from_rgb(30, 30, 40));
-                
-                // Show column headers
-                if !table_info.columns.is_empty() {
-                    let text = table_info.columns.iter()
-                        .take(3)
-                        .map(|c| &c.name[..c.name.len().min(8)])
-                        .collect::<Vec<_>>()
-                        .join(" | ");
+                // Query input area (if selected)
+                if selected {
+                    let query_rect = Rect::from_min_size(
+                        rect.min + Vec2::new(10.0, 30.0),
+                        Vec2::new(rect.width() - 20.0, 25.0)
+                    );
+                    
+                    // Draw query input background
+                    painter.rect_filled(
+                        query_rect,
+                        3.0,
+                        Color32::from_rgba_premultiplied(40, 40, 50, 200),
+                    );
+                    
+                    // Get query text for this node
+                    let query_text = state.node_queries.get(&node.id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("SELECT * FROM ... LIMIT 10");
+                    
+                    // Draw query text
                     painter.text(
-                        preview_rect.min + Vec2::new(5.0, 5.0),
+                        query_rect.min + Vec2::new(5.0, 5.0),
                         egui::Align2::LEFT_TOP,
-                        text,
-                        FontId::monospace(10.0 * self.zoom),
+                        query_text,
+                        FontId::proportional(12.0 * self.zoom),
                         Color32::from_gray(200),
                     );
+                }
+                
+                // Mini data preview (show actual data if available)
+                let preview_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(10.0, if selected { 60.0 } else { 35.0 }),
+                    Vec2::new(rect.width() - 20.0, rect.height() - (if selected { 70.0 } else { 45.0 }))
+                );
+                
+                // Check if we have actual data for this node
+                if let Some(preview) = state.node_data.get(&node.id) {
+                    // Draw actual data preview
+                    let font_size = 10.0 * self.zoom;
+                    let line_height = 14.0 * self.zoom;
+                    
+                    // Headers
+                    if let Some(headers) = &preview.headers {
+                        let header_text = headers.join(" | ");
+                        painter.text(
+                            preview_rect.min,
+                            egui::Align2::LEFT_TOP,
+                            header_text,
+                            FontId::proportional(font_size),
+                            Color32::from_rgb(120, 180, 120),
+                        );
+                    }
+                    
+                    // Data rows
+                    if let Some(rows) = &preview.rows {
+                        for (i, row) in rows.iter().take(3).enumerate() {
+                            let y_offset = (i + 1) as f32 * line_height;
+                            let row_text = row.join(" | ");
+                            painter.text(
+                                preview_rect.min + Vec2::new(0.0, y_offset),
+                                egui::Align2::LEFT_TOP,
+                                row_text,
+                                FontId::proportional(font_size),
+                                Color32::from_gray(180),
+                            );
+                        }
+                    }
+                } else {
+                    // Show placeholder for columns if no data yet
+                    let y_offset = 0.0;
+                    for (i, col) in table_info.columns.iter().take(4).enumerate() {
+                        painter.text(
+                            preview_rect.min + Vec2::new(0.0, y_offset + i as f32 * 14.0 * self.zoom),
+                            egui::Align2::LEFT_TOP,
+                            &col.name,
+                            FontId::proportional(10.0 * self.zoom),
+                            Color32::from_gray(150),
+                        );
+                    }
                 }
             }
             CanvasNodeType::Plot { plot_type } => {
@@ -503,13 +578,72 @@ impl CanvasPanel {
                     Stroke::new(2.0, if selected { Color32::from_rgb(250, 150, 100) } else { Color32::from_gray(100) }),
                 );
                 
+                // Title bar
+                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 25.0));
+                painter.rect_filled(title_rect, 5.0, Color32::from_rgb(70, 50, 50));
+                
                 painter.text(
-                    rect.center(),
+                    title_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     format!("📊 {}", plot_type),
-                    FontId::proportional(16.0 * self.zoom),
+                    FontId::proportional(14.0 * self.zoom),
                     Color32::WHITE,
                 );
+                
+                // Plot preview area
+                let plot_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(5.0, 30.0),
+                    Vec2::new(rect.width() - 10.0, rect.height() - 35.0),
+                );
+                painter.rect_filled(plot_rect, 2.0, Color32::from_rgb(40, 30, 30));
+                
+                // Check if connected to a data source
+                let has_data = false; // TODO: Check connections when state is available
+                
+                if has_data {
+                    // Draw placeholder visualization
+                    match plot_type.as_str() {
+                        "Histogram" => {
+                            // Draw simple bars
+                            let bar_width = plot_rect.width() / 5.0;
+                            for i in 0..5 {
+                                let height = (i as f32 + 1.0) * 0.15 * plot_rect.height();
+                                let bar_rect = Rect::from_min_size(
+                                    plot_rect.min + Vec2::new(i as f32 * bar_width + 2.0, plot_rect.height() - height),
+                                    Vec2::new(bar_width - 4.0, height),
+                                );
+                                painter.rect_filled(bar_rect, 2.0, Color32::from_rgb(100, 150, 200));
+                            }
+                        }
+                        "Line" | "Scatter" => {
+                            // Draw simple line
+                            painter.line_segment(
+                                [
+                                    plot_rect.min + Vec2::new(10.0, plot_rect.height() - 10.0),
+                                    plot_rect.max - Vec2::new(10.0, 10.0),
+                                ],
+                                Stroke::new(2.0, Color32::from_rgb(100, 200, 150)),
+                            );
+                        }
+                        _ => {
+                            painter.text(
+                                plot_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "📊",
+                                FontId::proportional(32.0 * self.zoom),
+                                Color32::from_gray(150),
+                            );
+                        }
+                    }
+                } else {
+                    painter.text(
+                        plot_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "No data",
+                        FontId::proportional(12.0 * self.zoom),
+                        Color32::from_gray(150),
+                    );
+                }
             }
             CanvasNodeType::Note { content } => {
                 // Draw note node

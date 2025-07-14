@@ -729,7 +729,12 @@ impl JupyterIntegrationEngine {
         html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
         html.push_str(&format!("<title>{}</title>\n", notebook.name));
         html.push_str("<style>\n");
-        html.push_str(include_str!("../assets/notebook.css"));
+        // html.push_str(include_str!("../assets/notebook.css"));
+        html.push_str(r#"
+                .notebook-container { font-family: Arial, sans-serif; }
+                .cell { margin: 10px 0; padding: 10px; border: 1px solid #ddd; }
+                .output { background: #f5f5f5; padding: 10px; }
+        "#);
         html.push_str("</style>\n</head>\n<body>\n");
         html.push_str(&format!("<h1>{}</h1>\n", notebook.name));
 

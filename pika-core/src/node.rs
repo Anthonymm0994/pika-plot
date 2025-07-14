@@ -137,6 +137,7 @@ pub trait DataNode: Node {
     fn output_data(&self) -> Option<Arc<dyn Any + Send + Sync>>;
 }
 
+#[derive(Debug, Clone)]
 pub struct RenderData {
     pub data: Vec<u8>,
 }
