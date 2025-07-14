@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::types::NodeId;
+use crate::nodes::NodeConnection;
 
 /// Workspace configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,8 +66,8 @@ pub enum ConnectionStyle {
 /// Workspace state that can be persisted
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceState {
-    pub canvas_nodes: HashMap<NodeId, crate::nodes::CanvasNode>,
-    pub connections: Vec<Connection>,
+    pub canvas_nodes: HashMap<NodeId, NodeConnection>,
+    pub connections: Vec<NodeConnection>,
     pub camera_position: (f32, f32),
     pub camera_zoom: f32,
     pub selected_nodes: Vec<NodeId>,

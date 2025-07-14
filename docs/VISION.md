@@ -1,195 +1,134 @@
-# Pika-Plot Vision & Architecture
+# Pika-Plot Vision
 
-## 🎯 Core Vision: "Excalidraw for Gigabytes of Data"
+## Overview
 
-Pika-Plot is an advanced data visualization tool that fuses the best of **pebble** (type inference & configuration) and **frog-viz** (GPU-accelerated plotting) into a single, powerful application centered around an **infinite canvas workspace**.
+Pika-Plot aims to combine the best aspects of various tools (Jupyter's interactivity, Obsidian's graph view, Excalidraw's drawing capabilities, and GPU-accelerated plotting) into a single application centered around an **infinite canvas workspace**.
 
-### Key Principles
-- **Intuitive**: Drag-and-drop canvas interface, visual connections
-- **Powerful**: Handle gigabytes of data with GPU acceleration
-- **Beautiful**: Polished UI with delightful interactions
-- **Fast**: 60 FPS with 1M–50M points
-- **Offline**: No internet dependencies, works on Windows 10/11
+## Core Design Principles
 
-## ✅ UI Paradigm
+- **Canvas-First**: Everything happens on an infinite, zoomable canvas
+- **Performance**: Handle gigabytes of data with GPU acceleration
+- **Visual**: See your data, queries, and results directly on the canvas
+- **Connected**: Link data sources, transformations, and visualizations with visual connections
+
+## Key Features
 
 ### 1. Infinite Canvas Workspace
-**Status**: ✅ Implemented in `pika-ui/src/panels/canvas.rs`
-- Pan with middle mouse button
-- Zoom with scroll wheel
-- Grid background for spatial reference
-- Nodes can be dragged and positioned freely
+- Pan, zoom, and navigate like Excalidraw
+- Place data tables, plots, notes, and queries anywhere
+- Draw connections between elements to show data flow
+- Group related items visually
 
-### 2. Thread System (Visual Connections)
-**Status**: ✅ Basic implementation complete
-- Color-coded connections between nodes
-- Bezier curves for smooth visual flow
-- Connection types: DataFlow, Transform, Join
-- **TODO**: Color coding by data type/connection type
+### 2. Data Sources as Visual Elements
+- **CSV/Parquet files** appear as table nodes on canvas
+- **Live database connections** shown as database icons
+- **API endpoints** displayed as service nodes
+- Preview data directly in the node
 
-### 3. Breadcrumb Trails
-**Status**: ❌ Not yet implemented
-- **TODO**: Add breadcrumb bar showing: Table → Query → Plot
-- Should update based on selected node
-- Click to navigate back through pipeline
+### 3. Visual Query Building
+- Drag tables onto canvas to start queries
+- Connect tables visually to create joins
+- Add filter/transform nodes between connections
+- See query results update in real-time
 
-## 🚀 Technical Architecture
+### 4. GPU-Accelerated Plots
+- **Scatter plots** with millions of points
+- **Heatmaps** with real-time updates
+- **3D visualizations** with smooth interaction
+- **Time series** with intelligent downsampling
+- All rendering at 60+ FPS
 
-### From pebble (Reused/Enhanced):
-- ✅ Type inference logic (`ImportOptions.infer_schema`)
-- ✅ File configuration dialog (`FileImportDialog`)
-- ✅ CSV import with delimiter detection
-- ✅ Clean UI patterns and theme system
+### 5. Interactive Analysis
+- Click on plot points to see raw data
+- Brush to select regions and filter connected plots
+- Histogram of selected data appears automatically
+- Statistical summaries update live
 
-### From frog-viz (Reused/Enhanced):
-- ✅ Tokio async runtime architecture
-- ✅ Event-driven UI<->Engine communication
-- ✅ Multi-crate structure (core, engine, ui)
-- ✅ GPU manager with memory tracking
-- ❌ TODO: Port scatter/line plot implementations
-- ❌ TODO: Port time series navigation
+### 6. Drawing and Annotation
+- Draw directly on the canvas to annotate findings
+- Add arrows, shapes, and text
+- Highlight important patterns in plots
+- Create visual explanations of your analysis
 
-### New in Pika-Plot:
-- ✅ Node-based canvas (like Excalidraw)
-- ✅ Memory coordinator (unified RAM/VRAM management)
-- ✅ DuckDB integration for SQL queries
-- ✅ Streaming data architecture
-- ❌ TODO: GPU-accelerated aggregation
-- ❌ TODO: Smart caching with cost-based eviction
+### 7. Notebook Integration
+- Drop Jupyter cells onto the canvas
+- Connect data nodes to code cells
+- See outputs rendered on canvas
+- Mix code, data, and visualizations freely
 
-## 📊 Performance Targets
+## User Workflow Example
 
-### Current Status:
-- ✅ GPU device validation and memory tracking
-- ✅ Streaming architecture for large datasets
-- ✅ Memory coordinator prevents OOM
-- ❌ TODO: Benchmark with 1M+ points
-- ❌ TODO: Level-of-detail rendering
-- ❌ TODO: GPU instancing for massive datasets
+1. **Import Data**: Drag CSV file onto canvas → table node appears
+2. **Explore**: Click table node → see data preview and statistics
+3. **Query**: Draw connection to create filter node → specify conditions
+4. **Visualize**: Connect filtered data to plot node → instant visualization
+5. **Analyze**: Brush select interesting region → connected histogram updates
+6. **Annotate**: Draw arrows pointing to anomalies, add text explanations
+7. **Share**: Export canvas as interactive HTML or static report
 
-### Goals:
-- 60 FPS with 1-5M points (scatter/line)
-- 30 FPS with 5-50M points (aggregated)
-- < 100ms query response for cached data
-- < 1s for uncached queries on GB datasets
+## Technical Architecture
 
-## 🎨 Delight & Polish Features
+### Frontend (egui-based)
+- Custom canvas widget with GPU-accelerated rendering
+- Node-based visual programming system
+- Real-time collaboration support
+- Responsive design that works on tablets
 
-### Implemented:
-- ✅ Smooth pan/zoom on canvas
-- ✅ Node hover effects
-- ✅ Progress indicators
-- ✅ Memory usage visualization
+### Backend (Rust)
+- Arrow-based columnar data processing
+- GPU compute shaders for aggregations
+- Streaming query engine
+- WebSocket server for real-time updates
 
-### TODO:
-- ❌ "Spark" gesture for quick plots
-- ❌ Lasso select for data points
-- ❌ Data lighthouse (minimap)
-- ❌ Animated transitions
-- ❌ Sound effects for actions
-- ❌ Keyboard shortcuts overlay
+### Data Layer
+- DuckDB for SQL queries
+- Polars for DataFrame operations
+- Custom GPU kernels for specific operations
+- Memory-mapped files for large datasets
 
-## 🧪 Testing Strategy
+## Inspiration Sources
 
-### Current:
-- ✅ Unit tests for core types
-- ✅ Integration tests for engine
-- ❌ TODO: UI snapshot tests
-- ❌ TODO: Performance benchmarks
-- ❌ TODO: Memory leak tests
+### From Jupyter
+- Interactive code execution
+- Rich output displays
+- Narrative flow
 
-### Needed:
-1. GPU fallback testing (software renderer)
-2. Large dataset stress tests
-3. Multi-node pipeline tests
-4. Export/import round-trip tests
+### From Obsidian
+- Graph view of connections
+- Bidirectional linking
+- Local-first architecture
 
-## 🔧 Implementation Roadmap
+### From Excalidraw
+- Infinite canvas
+- Drawing tools
+- Visual thinking
 
-### Phase 1: Foundation (Current)
-- ✅ Basic architecture setup
-- ✅ Canvas with nodes
-- ✅ Import CSV/Parquet
-- ✅ Memory management
-- ⏳ Basic SQL queries
+### From Tableau/PowerBI
+- Drag-and-drop visualization
+- Interactive dashboards
+- Professional polish
 
-### Phase 2: Visualization
-- [ ] Port scatter plot from frog-viz
-- [ ] Port line plot from frog-viz
-- [ ] Implement heatmaps
-- [ ] GPU-accelerated rendering
-- [ ] Level-of-detail system
+### From Observable
+- Reactive updates
+- Data flow visualization
+- Shareable notebooks
 
-### Phase 3: Polish
-- [ ] Breadcrumb navigation
-- [ ] Minimap/lighthouse
-- [ ] Keyboard shortcuts
-- [ ] Export system
-- [ ] Performance optimizations
+## Success Metrics
 
-### Phase 4: Advanced
-- [ ] Custom transforms
-- [ ] Python integration
-- [ ] Collaborative features
-- [ ] Plugin system
+- Can load and visualize 1GB+ CSV files smoothly
+- Plots render at 60 FPS with millions of points
+- Zero learning curve for basic operations
+- Power users can build complex analyses visually
+- Exports work seamlessly (PNG, SVG, HTML, PDF)
 
-## 🚨 Risk Areas & Mitigations
+## Future Possibilities
 
-### GPU Compatibility
-**Risk**: Not all Windows machines have discrete GPUs
-**Mitigation**: 
-- ✅ Fallback to CPU rendering
-- ✅ Mock GPU for testing
-- TODO: Software rasterizer option
+- **AI Assistant**: Natural language queries on canvas
+- **Version Control**: Git-like branching for analyses
+- **Cloud Sync**: Share canvases across devices
+- **Plugin System**: Custom nodes and visualizations
+- **Mobile App**: Touch-optimized canvas for tablets
 
-### Memory Management
-**Risk**: OOM with large datasets
-**Mitigation**:
-- ✅ Central memory coordinator
-- ✅ Cost-based eviction
-- ✅ Streaming architecture
-- TODO: Disk-based overflow
+## Design Philosophy
 
-### Performance
-**Risk**: Slow with millions of points
-**Mitigation**:
-- TODO: GPU aggregation shaders
-- TODO: Spatial indexing
-- TODO: Progressive rendering
-
-## 🤝 Cross-Agent Delegation
-
-Questions for specialized agents:
-
-### GPU Agent:
-1. Optimal vertex layout for 50M+ points?
-2. Aggregation shader strategies?
-3. DX11 vs DX12 tradeoffs?
-
-### UI/UX Agent:
-1. Best practices for infinite canvas?
-2. Touch gesture support?
-3. Accessibility considerations?
-
-### Performance Agent:
-1. Async scheduling strategies?
-2. Cache-friendly data layouts?
-3. SIMD opportunities?
-
-## 📝 Key Differentiators
-
-What makes Pika-Plot special:
-1. **Canvas-first**: Not just plots in tabs, but spatial workspace
-2. **SQL-native**: DuckDB integration for complex queries
-3. **GPU-powered**: Not just for rendering, but computation
-4. **Offline-first**: No cloud dependencies
-5. **Windows-optimized**: Native performance on Windows
-
-## 🎯 Success Metrics
-
-We'll know we've succeeded when:
-1. Users can explore GB datasets at 60 FPS
-2. Creating visualizations feels like sketching
-3. Complex pipelines are self-documenting via canvas
-4. Performance rivals specialized tools
-5. It "just works" on any Windows machine 
+The canvas is not just a place to put things—it's a thinking space. Users should feel like they're sketching out ideas, with data and computation as their medium. The tool should make complex analyses feel as natural as drawing on a whiteboard, while providing the computational capabilities needed for serious data science work. 

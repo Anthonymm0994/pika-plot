@@ -1,13 +1,15 @@
-//! UI panels module.
+//! UI panels for the application.
 
-mod canvas_panel;
-mod data;
-mod properties;
-mod status_bar;
-mod grid_view;
+pub mod canvas;
+pub mod canvas_panel;
+pub mod data;
+pub mod grid_view;
+pub mod properties;
+pub mod status_bar;
+pub mod data_sources;
+pub mod canvas_toolbar;
 
-pub use canvas_panel::CanvasPanel;
-pub use data::DataPanel;
-pub use properties::PropertiesPanel;
-pub use status_bar::StatusBar;
-pub use grid_view::{GridView, GridViewPanel}; 
+// Re-export commonly used items
+pub use self::canvas::CanvasPanel;
+pub use self::properties::PropertiesPanel;
+pub use self::status_bar::StatusBar; 

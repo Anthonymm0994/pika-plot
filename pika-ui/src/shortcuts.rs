@@ -216,24 +216,32 @@ fn format_shortcut(modifiers: Modifiers, key: Key) -> String {
     }
     
     // Format key name
-    let key_name = match key {
-        Key::Equals => "=",
-        Key::Minus => "-",
-        Key::Num0 => "0",
-        Key::Num1 => "1",
-        Key::Num2 => "2",
-        Key::Num3 => "3",
-        Key::Num4 => "4",
-        Key::F9 => "F9",
-        Key::F10 => "F10",
-        Key::F11 => "F11",
-        Key::F12 => "F12",
-        Key::Delete => "Del",
-        Key::Tab => "Tab",
-        _ => return format!("{:?}", key).replace("Key::", ""),
+    let key_str = match key {
+        Key::Equals => "=".to_string(),
+        Key::Minus => "-".to_string(),
+        Key::Num0 => "0".to_string(),
+        Key::Num1 => "1".to_string(),
+        Key::Num2 => "2".to_string(),
+        Key::Num3 => "3".to_string(),
+        Key::Num4 => "4".to_string(),
+        Key::F9 => "F9".to_string(),
+        Key::F10 => "F10".to_string(),
+        Key::F11 => "F11".to_string(),
+        Key::F12 => "F12".to_string(),
+        Key::Delete => "Del".to_string(),
+        Key::Tab => "Tab".to_string(),
+        _ => {
+            // Handle other keys - format!("{:?}", key) for single letter keys returns just the letter
+            let formatted = format!("{:?}", key);
+            if formatted.starts_with("Key::") {
+                formatted.replace("Key::", "")
+            } else {
+                formatted
+            }
+        }
     };
     
-    parts.push(key_name);
+    parts.push(&key_str);
     parts.join("+")
 }
 

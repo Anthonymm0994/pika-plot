@@ -1,4 +1,4 @@
-//! Professional CSV import dialog exactly like Pebble's superior design.
+//! CSV import dialog based on Pebble's design.
 //! Features: multi-file selection, clean data preview, header configuration,
 //! professional column selection table, Include/PK/Not Null/Unique/Index checkboxes,
 //! better visual hierarchy, streamlined null value handling, fast loading for large CSVs.

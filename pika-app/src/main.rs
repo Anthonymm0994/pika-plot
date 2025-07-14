@@ -1,6 +1,6 @@
 use anyhow::Result;
 use eframe::egui;
-use pika_ui::app::PikaApp;
+use pika_ui::App;
 use tracing_subscriber;
 
 #[tokio::main]
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
             style.visuals.window_rounding = egui::Rounding::same(6.0);
             cc.egui_ctx.set_style(style);
             
-            Ok(Box::new(PikaApp::new(cc)))
+            Ok(Box::new(App::new(cc)))
         }),
     );
     

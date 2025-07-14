@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::{
     types::{NodeId, Point2, Size2},
-    nodes::CanvasNode,
-    workspace::Connection,
+    nodes::{CanvasNode, NodeConnection},
+    workspace::Connection as WorkspaceConnection,
 };
 
 /// Workspace snapshot for saving/loading
@@ -24,7 +24,7 @@ pub struct WorkspaceSnapshot {
     pub nodes: HashMap<NodeId, CanvasNode>,
     
     /// All connections between nodes
-    pub connections: Vec<Connection>,
+    pub connections: Vec<NodeConnection>,
     
     /// Window configurations
     pub windows: Vec<WindowSnapshot>,
@@ -162,7 +162,7 @@ impl SnapshotBuilder {
         self
     }
     
-    pub fn add_connection(mut self, conn: Connection) -> Self {
+    pub fn add_connection(mut self, conn: NodeConnection) -> Self {
         self.snapshot.connections.push(conn);
         self
     }

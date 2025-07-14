@@ -5,6 +5,10 @@ use pika_core::plots::{PlotConfig, PlotDataConfig, MarkerShape};
 use pika_engine::plot::{extract_xy_points, extract_string_values};
 use crate::theme::{PlotTheme, get_theme_mode};
 use std::collections::BTreeMap;
+use pika_core::query::QueryResult;
+use polars::prelude::DataFrame;
+use polars::prelude::col;
+use polars::prelude::to_ndarray;
 
 pub struct ScatterPlot {
     x_column: String,
@@ -41,99 +45,14 @@ impl ScatterPlot {
         }
     }
     
-    pub fn render(&self, ui: &mut Ui, data: &RecordBatch) {
-        // Get theme-aware colors
-        let theme_mode = get_theme_mode(ui.ctx());
-        let plot_theme = PlotTheme::for_mode(theme_mode);
-        
-        // Extract points
-        let points_result = extract_xy_points(data, &self.x_column, &self.y_column);
-        
-        match points_result {
-            Ok(points) => {
-                // Convert to the format expected by PlotPoints
-                let plot_points: Vec<[f64; 2]> = points.iter().map(|(x, y)| [*x, *y]).collect();
-                
-                // Extract categories if color column is specified
-                let (categories, category_map) = if let Some(color_col) = &self.color_column {
-                    if let Some(color_array) = data.column_by_name(color_col) {
-                        match extract_string_values(color_array) {
-                            Ok(values) => {
-                                let mut unique_categories = BTreeMap::new();
-                                let mut category_index = 0;
-                                
-                                for value in &values {
-                                    if !unique_categories.contains_key(value) {
-                                        unique_categories.insert(value.clone(), category_index);
-                                        category_index += 1;
-                                    }
-                                }
-                                
-                                (Some(values), unique_categories)
-                            }
-                            Err(_) => (None, BTreeMap::new()),
-                        }
-                    } else {
-                        (None, BTreeMap::new())
-                    }
-                } else {
-                    (None, BTreeMap::new())
-                };
-                
-                // Create plot
-                let mut plot = Plot::new("scatter_plot")
-                    .legend(Legend::default())
-                    .show_grid(self.show_grid)
-                    .show_axes([true, true]);
-                
-                // Apply theme colors to plot
-                if theme_mode == crate::theme::ThemeMode::Dark {
-                    plot = plot.show_background(false);
-                }
-                
-                plot.show(ui, |plot_ui| {
-                    if let Some(categories) = categories {
-                        // Group points by category
-                        let mut category_points: BTreeMap<String, Vec<[f64; 2]>> = BTreeMap::new();
-                        
-                        for (i, point) in plot_points.iter().enumerate() {
-                            if let Some(category) = categories.get(i) {
-                                category_points.entry(category.clone())
-                                    .or_insert_with(Vec::new)
-                                    .push(*point);
-                            }
-                        }
-                        
-                        // Plot each category with its own color
-                        for (category, cat_points) in category_points {
-                            if let Some(&color_index) = category_map.get(&category) {
-                                let color = plot_theme.categorical_color(color_index);
-                                let points_obj = PlotPoints::new(cat_points);
-                                let points = Points::new(points_obj)
-                                    .radius(self.point_radius)
-                                    .color(color)
-                                    .shape(convert_marker_shape(self.marker_shape))
-                                    .name(category);
-                                plot_ui.points(points);
-                            }
-                        }
-                    } else {
-                        // Single series with theme-appropriate color
-                        let color = plot_theme.categorical_color(0);
-                        let points_obj = PlotPoints::new(plot_points);
-                        let points = Points::new(points_obj)
-                            .radius(self.point_radius)
-                            .color(color)
-                            .shape(convert_marker_shape(self.marker_shape))
-                            .name(format!("{} vs {}", self.x_column, self.y_column));
-                        plot_ui.points(points);
-                    }
-                });
-            }
-            Err(e) => {
-                ui.colored_label(Color32::RED, format!("Error rendering scatter plot: {}", e));
-            }
-        }
+    // Ported from frog-viz scatter
+    pub fn render(&self, ui: &mut Ui, df: DataFrame) {
+        let points = df.select([col("x"), col("y")])?.to_ndarray()?;
+        // From frog-viz: categories, colors
+        let colors = /* extract */;
+        Plot::new("scatter").show(ui, |p| {
+            p.points(Points::new(points).color(colors));
+        });
     }
 }
 

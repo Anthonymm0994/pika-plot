@@ -211,12 +211,11 @@ mod tests {
         
         // Add a test node
         let table_info = TableInfo {
-            id: NodeId::new(),
             name: "test_table".to_string(),
-            table_name: "test_table".to_string(),
-            row_count: 100,
+            source_path: None,
+            row_count: Some(100),
             columns: vec![],
-            size_bytes: 1024,
+            preview_data: None,
         };
         state.add_data_node(table_info);
         

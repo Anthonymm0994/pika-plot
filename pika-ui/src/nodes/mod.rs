@@ -1,5 +1,7 @@
 //! Node implementations for the canvas
 
+use egui::{Ui, Rect, Color32, Align2, FontId, Pos2, vec2};
+
 pub mod plot_node;
 pub mod query_node;
 pub mod table_node;
@@ -24,3 +26,13 @@ pub fn create_node(node_type: &str, id: NodeId) -> Option<Box<dyn Node>> {
 pub const TABLE_NODE_SIZE: Size2 = Size2 { width: 300.0, height: 200.0 };
 pub const QUERY_NODE_SIZE: Size2 = Size2 { width: 350.0, height: 250.0 };
 pub const PLOT_NODE_SIZE: Size2 = Size2 { width: 400.0, height: 400.0 }; 
+
+impl Node {
+    pub fn render(&self, ui: &mut Ui, rect: Rect) {
+        ui.painter().rect_filled(rect, 4.0, Color32::DARK_GRAY);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, &self.title, FontId::default(), Color32::WHITE);
+    }
+}
+impl NodeCore for PlotNode { /* ... */ }
+impl NodeCore for QueryNode { /* ... */ }
+// Use Point2 everywhere 

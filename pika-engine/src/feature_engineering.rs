@@ -7,7 +7,7 @@ use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Advanced feature engineering capabilities using cutting-edge Rust ML crates
+/// Feature engineering capabilities for machine learning
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureEngineer {
     pub config: FeatureEngineeringConfig,

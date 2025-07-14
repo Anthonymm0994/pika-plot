@@ -115,6 +115,15 @@ pub struct TableInfo {
     pub source_path: Option<PathBuf>,
     pub row_count: Option<usize>,
     pub columns: Vec<ColumnInfo>,
+    pub preview_data: Option<TablePreview>,
+}
+
+/// Table preview data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TablePreview {
+    pub rows: Vec<Vec<String>>,
+    pub current_page: usize,
+    pub rows_per_page: usize,
 }
 
 /// Column information

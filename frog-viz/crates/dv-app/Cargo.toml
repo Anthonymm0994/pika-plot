@@ -1,0 +1,52 @@
+[package]
+name = "dv-app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "frog"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+dv-core = { path = "../dv-core" }
+dv-data = { path = "../dv-data" }
+dv-views = { path = "../dv-views" }
+dv-ui = { path = "../dv-ui" }
+dv-templates = { path = "../dv-templates" }
+
+# Common dependencies
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+parking_lot = { workspace = true }
+
+# UI dependencies
+egui = { workspace = true }
+eframe = { workspace = true }
+egui_dock = { workspace = true }
+egui_extras = { workspace = true }
+egui_plot = { workspace = true }
+
+# Data dependencies
+arrow = { workspace = true }
+csv = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# File dialog
+rfd = "0.13"
+
+# Database
+rusqlite = { version = "0.30", features = ["bundled"] }
+chrono = { workspace = true }
+
+# Additional dependencies
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["wincon", "winuser", "libloaderapi", "processthreadsapi", "winbase", "winnls", "winerror", "winnt", "impl-default"] }
+
+[dev-dependencies] 

@@ -1,0 +1,33 @@
+[package]
+name = "dv-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Arrow data format
+arrow.workspace = true
+
+# Async trait for async methods in traits
+async-trait.workspace = true
+
+# Error handling
+anyhow.workspace = true
+
+# Concurrency
+parking_lot.workspace = true
+
+# UUID for unique identifiers
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Async runtime
+tokio.workspace = true
+
+# Fast hashing
+ahash.workspace = true
+
+# Serialization
+serde.workspace = true
+
+[dev-dependencies] 

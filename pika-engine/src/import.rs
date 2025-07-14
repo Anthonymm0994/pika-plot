@@ -131,6 +131,7 @@ impl DataImporter {
             source_path: Some(path.to_path_buf()),
             row_count: Some(row_count),
             columns,
+            preview_data: None, // TODO: Add preview data from rows
         })
     }
     

@@ -1,12 +1,6 @@
 //! UI components for the Pika-Plot application.
 
-use pika_core::{
-    events::EventBus,
-    error::Result,
-    types::NodeId,
-};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use anyhow::Result;
 
 // Core modules that work
 pub mod app;
@@ -17,11 +11,19 @@ pub mod tooltip_ext;
 pub mod renderer;
 pub mod shortcuts;
 
+// Screens
+pub mod screens;
+
 // Panels - only basic ones for now
 pub mod panels {
+    pub mod canvas;
     pub mod canvas_panel;
     pub mod status_bar;
     pub mod properties;
+    pub mod data_sources;
+    pub mod canvas_toolbar;
+    pub mod data;
+    pub mod grid_view;
 }
 
 // Widgets - only basic ones for now
@@ -44,16 +46,14 @@ pub mod plots {
 
 // TEMPORARILY DISABLED - Will be re-enabled once core functionality works
 // pub mod export;
-// pub mod workspace;
-// pub mod notifications;
-// pub mod advanced_widgets;
+// pub mod export { pub mod csv_export; }
 
-// Re-exports for convenience
-pub use app::PikaApp;
-pub use state::AppState;
+// Re-export commonly used types
+pub use app::App;
+pub use state::{AppState, Theme};
+// pub use export::{export_plot, ExportFormat}; // TODO: Add export module later
 
 /// Initialize the UI system
-pub fn init() -> Result<()> {
-    tracing::info!("Initializing Pika UI");
-    Ok(())
+pub fn init() {
+    // Any initialization logic
 }

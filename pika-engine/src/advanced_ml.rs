@@ -18,7 +18,7 @@ use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Advanced machine learning capabilities using cutting-edge Rust ML crates
+/// Machine learning capabilities using Rust ML crates
 #[derive(Debug, Clone)]
 pub struct AdvancedMLEngine {
     pub config: MLConfig,

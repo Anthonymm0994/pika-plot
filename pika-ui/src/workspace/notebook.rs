@@ -328,7 +328,7 @@ impl Notebook {
         };
         
         // Add initial cells
-        notebook.add_cell(CellType::Markdown, "# Welcome to Pika-Plot Notebook\n\nThis is a powerful data analysis and visualization notebook.".to_string());
+        notebook.add_cell(CellType::Markdown, "# Welcome to Pika-Plot Notebook\n\nThis is a data analysis and visualization notebook.".to_string());
         notebook.add_cell(CellType::Code, "-- SQL query example\nSELECT * FROM your_data LIMIT 10;".to_string());
         
         notebook

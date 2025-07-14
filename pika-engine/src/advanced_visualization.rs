@@ -10,7 +10,7 @@ use charming::element::*;
 use plotlars::*;
 use dataviz::figure::*;
 
-/// Advanced visualization engine combining multiple cutting-edge libraries
+/// Visualization engine combining multiple libraries
 pub struct AdvancedVisualizationEngine {
     charts: HashMap<String, ChartInstance>,
     themes: HashMap<String, Theme>,

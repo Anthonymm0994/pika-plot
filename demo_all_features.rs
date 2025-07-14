@@ -407,7 +407,7 @@ fn create_demo_notebook() -> Notebook {
         CellType::Markdown,
         r#"# Comprehensive Data Analysis with Pika-Plot
 
-This notebook demonstrates the powerful analysis capabilities of Pika-Plot, including:
+This notebook demonstrates the analysis capabilities of Pika-Plot, including:
 - Statistical summaries and insights
 - Correlation analysis
 - Outlier detection

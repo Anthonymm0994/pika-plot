@@ -1,10 +1,12 @@
+//! Advanced widget collection for egui
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use egui::{Context, Ui, Response, Vec2, Pos2, Color32, Stroke, Rect};
 
-/// Advanced widget collection integrating cutting-edge egui extensions
+/// Advanced widget collection for egui
 pub struct AdvancedWidgetManager {
     graph_widgets: HashMap<String, GraphWidget>,
     plot_widgets: HashMap<String, PlotWidget>,

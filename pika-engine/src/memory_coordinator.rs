@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::collections::BinaryHeap;
 use anyhow::Result;
 use pika_core::types::NodeId;
+use polars::prelude::*;
+use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Item in the cache with associated cost for eviction.
 #[derive(Debug, Clone)]
@@ -83,6 +86,8 @@ pub struct MemoryCoordinator {
     
     /// Eviction callbacks
     eviction_callbacks: Arc<Mutex<Vec<Box<dyn Fn(&str) + Send + Sync>>>>,
+
+    indices: HashMap<String, BTreeMap<String, Vec<usize>>>
 }
 
 impl MemoryCoordinator {
@@ -101,6 +106,7 @@ impl MemoryCoordinator {
             duckdb_limit: AtomicUsize::new(duckdb_limit),
             cached_items: Arc::new(Mutex::new(BinaryHeap::new())),
             eviction_callbacks: Arc::new(Mutex::new(Vec::new())),
+            indices: HashMap::new()
         }
     }
     
@@ -267,6 +273,19 @@ impl MemoryCoordinator {
         if pressure > 0.9 {
             tracing::warn!("Memory pressure high: {:.1}%", pressure * 100.0);
         }
+    }
+
+    pub fn index_column(&mut self, table: &str, col: &str, values: &Series) {
+        let mut map = BTreeMap::new();
+        for (idx, val) in values.iter().enumerate() {
+            let key = val.to_string();
+            map.entry(key).or_insert(Vec::new()).push(idx);
+        }
+        self.indices.insert(format!("{table}_{col}"), map);
+    }
+    pub fn query_index(&self, table: &str, col: &str, value: &AnyValue) -> Option<Vec<usize>> {
+        let key = format!("{table}_{col}");
+        self.indices.get(&key).and_then(|m| m.get(&value.to_string()).cloned())
     }
 }
 

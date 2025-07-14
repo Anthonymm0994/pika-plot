@@ -1,69 +1,99 @@
-//! Query and data caching for performance optimization.
+//! Query caching module.
 
-// use moka::sync::Cache;  // TODO: Add moka to dependencies
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
 use pika_core::{
-    error::Result,
     types::QueryResult,
 };
-use std::sync::Arc;
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
-/// Query result cache with memory pressure monitoring
+/// Query cache for storing results
 pub struct QueryCache {
-    // cache: Cache<String, Arc<QueryResult>>,  // TODO: Use moka cache
-    cache: HashMap<String, Arc<QueryResult>>,
+    entries: HashMap<String, CacheEntry>,
+    max_entries: usize,
+}
+
+#[derive(Clone)]
+struct CacheEntry {
+    result: Arc<QueryResult>,
+    query: String,
 }
 
 impl QueryCache {
-    /// Create a new cache with memory limit
-    pub fn new_with_limit(_memory_limit: u64) -> Self {
-        QueryCache {
-            cache: HashMap::new(),
+    /// Create a new query cache with specified capacity
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_entries: capacity,
         }
     }
     
-    /// Get memory pressure level (0-100)
-    pub fn pressure_level(&self) -> u8 {
-        // TODO: Implement actual memory pressure calculation
-        0
+    /// Create a new query cache with memory limit (for backward compatibility)
+    pub fn new_with_limit(_memory_limit: u64) -> Self {
+        // For now, ignore memory limit and use default capacity
+        Self::new(100)
     }
     
+    /// Get a cached result if it exists
     pub fn get(&self, key: &str) -> Option<Arc<QueryResult>> {
-        self.cache.get(key).cloned()
+        self.entries.get(key).map(|entry| entry.result.clone())
     }
     
-    pub fn insert(&mut self, key: String, value: Arc<QueryResult>) {
-        self.cache.insert(key, value);
+    /// Insert a new result into the cache
+    pub fn insert(&mut self, query: String, result: QueryResult) -> String {
+        let key = format!("query_{}", Uuid::new_v4());
+        
+        // Simple eviction: remove oldest if at capacity
+        if self.entries.len() >= self.max_entries {
+            if let Some(first_key) = self.entries.keys().next().cloned() {
+                self.entries.remove(&first_key);
+            }
+        }
+        
+        self.entries.insert(key.clone(), CacheEntry {
+            result: Arc::new(result),
+            query,
+        });
+        
+        key
     }
     
+    /// Clear all cached entries
     pub fn clear(&mut self) {
-        self.cache.clear();
+        self.entries.clear();
+    }
+    
+    /// Get the number of cached entries
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    
+    /// Check if cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     #[test]
-    fn test_memory_pressure_levels() {
-        let mut cache = QueryCache::new_with_limit(1024);
+    fn test_cache_operations() {
+        let mut cache = QueryCache::new(2);
         
-        // Initially should be green
-        assert_eq!(cache.pressure_level(), 0);
-        
-        // Add some data
-        let test_result = QueryResult {
+        let result = QueryResult {
             columns: vec!["test".to_string()],
             row_count: 1,
             execution_time_ms: 10,
-            memory_used_bytes: Some(700),
+            memory_used_bytes: None,
         };
-        cache.insert("test".to_string(), Arc::new(test_result));
         
-        // Manual check (monitoring would do this automatically)
-        // The pressure level is currently hardcoded to 0, so this test will always pass.
-        // In a real scenario, you'd expect it to be 0 or a value based on memory usage.
+        let key = cache.insert("SELECT * FROM test".to_string(), result.clone());
+        assert_eq!(cache.len(), 1);
+        
+        let cached = cache.get(&key).unwrap();
+        assert_eq!(cached.row_count, 1);
     }
 } 

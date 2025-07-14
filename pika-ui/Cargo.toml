@@ -10,6 +10,7 @@ repository.workspace = true
 # Core dependencies
 pika-core = { path = "../pika-core" }
 pika-engine = { path = "../pika-engine" }
+pika-traits = { path = "../pika-traits" }
 
 # UI framework
 egui = { workspace = true }

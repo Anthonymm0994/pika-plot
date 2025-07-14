@@ -89,6 +89,30 @@ pub struct PlotConfig {
     pub height: u32,
     pub dark_mode: bool,
     pub specific: PlotDataConfig,
+    pub x_column: String,
+}
+
+impl Default for PlotConfig {
+    fn default() -> Self {
+        Self {
+            x_column: String::new(),
+            plot_type: PlotType::Scatter,
+            title: None,
+            x_label: None,
+            y_label: None,
+            width: 800,
+            height: 600,
+            dark_mode: false,
+            specific: PlotDataConfig::ScatterConfig {
+                x_column: String::new(),
+                y_column: String::new(),
+                size_column: None,
+                color_column: None,
+                point_radius: 3.0,
+                marker_shape: MarkerShape::Circle,
+            },
+        }
+    }
 }
 
 /// Plot-specific data configuration
@@ -349,83 +373,91 @@ pub enum MapStyle {
 impl PlotConfig {
     /// Create a scatter plot configuration
     pub fn scatter(x: String, y: String) -> Self {
+        let x_clone = x.clone();
         Self {
             plot_type: PlotType::Scatter,
             title: None,
-            x_label: Some(x.clone()),
+            x_label: Some(x_clone.clone()),
             y_label: Some(y.clone()),
             width: 800,
             height: 600,
             dark_mode: false,
             specific: PlotDataConfig::ScatterConfig {
-                x_column: x,
+                x_column: x_clone.clone(),
                 y_column: y,
                 size_column: None,
                 color_column: None,
                 point_radius: 3.0,
                 marker_shape: MarkerShape::Circle,
             },
+            x_column: x_clone,
         }
     }
     
     /// Create a line plot configuration
     pub fn line(x: String, y: String) -> Self {
+        let x_clone = x.clone();
         Self {
             plot_type: PlotType::Line,
             title: None,
-            x_label: Some(x.clone()),
+            x_label: Some(x_clone.clone()),
             y_label: Some(y.clone()),
             width: 800,
             height: 600,
             dark_mode: false,
             specific: PlotDataConfig::LineConfig {
-                x_column: x,
+                x_column: x_clone.clone(),
                 y_column: y,
                 color_column: None,
                 line_width: 2.0,
                 show_points: false,
                 interpolation: LineInterpolation::Linear,
             },
+            x_column: x_clone,
         }
     }
     
     /// Create a bar plot configuration
     pub fn bar(category: String, value: String) -> Self {
+        let category_clone = category.clone();
         Self {
             plot_type: PlotType::Bar,
             title: None,
-            x_label: Some(category.clone()),
+            x_label: Some(category_clone.clone()),
             y_label: Some(value.clone()),
             width: 800,
             height: 600,
             dark_mode: false,
             specific: PlotDataConfig::BarConfig {
-                category_column: category,
+                category_column: category_clone.clone(),
                 value_column: value,
                 orientation: BarOrientation::Vertical,
                 bar_width: 0.7,
                 stacked: false,
             },
+            x_column: category_clone,
         }
     }
     
     /// Create a histogram configuration
     pub fn histogram(column: String) -> Self {
+        let column_clone = column.clone();
         Self {
             plot_type: PlotType::Histogram,
             title: None,
-            x_label: Some(column.clone()),
+            x_label: Some(column_clone.clone()),
             y_label: Some("Count".to_string()),
             width: 800,
             height: 600,
             dark_mode: false,
             specific: PlotDataConfig::HistogramConfig {
-                column,
+                column: column_clone.clone(),
                 num_bins: 30,
                 bin_strategy: BinStrategy::Fixed,
                 show_density: false,
                 show_normal: false,
             },
+            x_column: column_clone,
         }
     }
 } 

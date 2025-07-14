@@ -1,11 +1,11 @@
-//! Professional CSV import dialog matching Pebble's superior design.
+//! Professional CSV import dialog.
 
-use pika_core::types::{ImportOptions, TableInfo, ColumnInfo};
-use pika_engine::enhanced_csv::{CsvFileStats, CsvAnalyzer};
-use egui::{Ui, Color32, ScrollArea, TextEdit, ComboBox, DragValue, Button, Context, Id};
-use egui_extras::{TableBuilder, Column};
+use egui::{Context, Id, Ui};
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
+use pika_core::{
+    types::{ImportOptions, TableInfo},
+};
+use egui_extras::{TableBuilder, Column};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ pub struct ImportResult {
     pub table_infos: Vec<TableInfo>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DataType {
     Text,
     Integer,
@@ -173,25 +173,33 @@ impl FileImportDialog {
         self.files.push(config);
     }
     
-    pub fn show(&mut self, ctx: &Context) -> Option<ImportResult> {
+    /// Show the dialog and process any imports
+    pub fn show(&mut self, ctx: &Context) -> Option<Vec<TableInfo>> {
         if !self.show {
             return None;
         }
         
-        let mut created_db_path = None;
+        let mut result = None;
+        let mut is_open = self.show;
         
-        egui::Window::new("📊 CSV Import")
-            .id(self.id)
-            .resizable(true)
-            .default_width(900.0)
+        egui::Window::new("CSV Import")
+            .id(Id::new("csv_import_dialog"))
+            .open(&mut is_open)
+            .default_width(800.0)
             .default_height(600.0)
-            .min_width(600.0)
-            .min_height(400.0)
+            .resizable(true)
             .show(ctx, |ui| {
-                self.render_content(ui, &mut created_db_path);
+                let mut created_result = None;
+                self.render_content(ui, &mut created_result);
+                
+                if let Some(import_result) = created_result {
+                    result = Some(import_result.table_infos);
+                }
             });
         
-        created_db_path
+        self.show = is_open;
+        
+        result
     }
     
     fn render_content(&mut self, ui: &mut egui::Ui, created_db_path: &mut Option<ImportResult>) {
@@ -1012,9 +1020,9 @@ impl FileImportDialog {
                 .filter(|config| !config.table_name.is_empty() && 
                     config.columns.iter().any(|c| c.included))
                 .map(|config| {
-                    let columns: Vec<ColumnInfo> = config.columns.iter()
+                    let columns: Vec<pika_core::types::ColumnInfo> = config.columns.iter()
                         .filter(|col| col.included)
-                        .map(|col| ColumnInfo {
+                        .map(|col| pika_core::types::ColumnInfo {
                             name: col.name.clone(),
                             data_type: col.data_type.to_sql_type().to_string(),
                             nullable: !col.not_null,
@@ -1028,11 +1036,12 @@ impl FileImportDialog {
                         None
                     };
                     
-                    TableInfo {
+                    pika_core::types::TableInfo {
                         name: config.table_name.clone(),
                         source_path: Some(config.path.clone()),
                         row_count,
                         columns,
+                        preview_data: None, // TODO: Add preview data
                     }
                 })
                 .collect();

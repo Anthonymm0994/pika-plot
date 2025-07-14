@@ -1,4 +1,4 @@
-//! Enhanced CSV import dialog inspired by Pebble's superior design.
+//! CSV import dialog based on Pebble's design.
 
 use egui::{Ui, Color32, ScrollArea, TextEdit, ComboBox, DragValue, Button, Context, Id};
 use egui_extras::{TableBuilder, Column};

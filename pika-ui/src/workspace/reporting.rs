@@ -543,7 +543,7 @@ impl ReportBuilder {
             
             // Add quality insights
             if quality_report.missing_data_percentage < 5.0 {
-                insights.push("Dataset has excellent data completeness".to_string());
+                insights.push("Dataset has high data completeness".to_string());
             } else if quality_report.missing_data_percentage < 15.0 {
                 insights.push("Dataset has acceptable data completeness".to_string());
             } else {

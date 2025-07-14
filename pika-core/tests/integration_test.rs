@@ -23,6 +23,7 @@ async fn test_events() -> Result<()> {
                 nullable: false,
             }
         ],
+        preview_data: None,
     };
     
     let event = Event::App(AppEvent::ImportComplete { 
@@ -58,6 +59,7 @@ async fn test_plot_config() -> Result<()> {
     let config = PlotConfig {
         plot_type: PlotType::Line,
         title: Some("Time Series".to_string()),
+        x_column: "time".to_string(),
         x_label: Some("Time".to_string()),
         y_label: Some("Value".to_string()),
         width: 800,
@@ -128,6 +130,7 @@ async fn test_table_info() -> Result<()> {
                 nullable: true,
             },
         ],
+        preview_data: None,
     };
     
     assert_eq!(table_info.name, "test_table");
@@ -149,6 +152,7 @@ async fn test_event_bus() -> Result<()> {
             source_path: None,
             row_count: Some(5),
             columns: vec![],
+            preview_data: None,
         }
     });
     
@@ -173,6 +177,7 @@ async fn test_canvas_node() -> Result<()> {
         source_path: None,
         row_count: Some(100),
         columns: vec![],
+        preview_data: None,
     };
     
     let node = CanvasNode {
@@ -197,6 +202,7 @@ async fn test_node_types() -> Result<()> {
         source_path: None,
         row_count: Some(100),
         columns: vec![],
+        preview_data: None,
     };
     
     let data_node = NodeType::DataSource { table_info };
@@ -227,6 +233,7 @@ async fn test_plot_config_scatter() -> Result<()> {
     let config = PlotConfig {
         plot_type: PlotType::Scatter,
         title: Some("Test Plot".to_string()),
+        x_column: "x".to_string(),
         x_label: Some("X".to_string()),
         y_label: Some("Y".to_string()),
         width: 400,

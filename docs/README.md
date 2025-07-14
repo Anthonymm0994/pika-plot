@@ -1,86 +1,103 @@
 # Pika-Plot Documentation
 
-Welcome to the Pika-Plot documentation! This folder contains all the design documents, implementation guides, and research for building our "Excalidraw for Gigabytes of Data" vision.
+## Overview
+Pika-Plot is a data visualization tool that combines the ease of Excalidraw's canvas with data analysis capabilities.
 
-## 📚 Documentation Structure
+## Quick Links
+- **[Multi-Level Overview](OVERVIEW.md)** - Start here! From executive summary to technical deep-dive
+- [Build and Run Instructions](../BUILD_AND_RUN.md)
+- [Available Plot Types](AVAILABLE_PLOT_TYPES.md) - 26 supported visualizations
+- [Project Vision](VISION.md) - Design goals and philosophy
 
-### Core Documents
-- **[VISION.md](VISION.md)** - The complete vision and architecture overview
-- **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - Current implementation status and gaps
-- **[CRITICAL_PATH.md](CRITICAL_PATH.md)** - MVP requirements and blockers
+## Architecture & Implementation
 
-### Design Documents
-- **[final_ideas/](final_ideas/)** - Refined design decisions and specifications
-- **[cross_agent_research/](cross_agent_research/)** - Research from multiple AI agents
-- **[rough_ideas/](rough_ideas/)** - Initial brainstorming and concepts
+### Core Documentation
+- [Architecture Summary](ARCHITECTURE_SUMMARY.md) - System overview and component relationships
+- [Architecture Patterns](ARCHITECTURE_PATTERNS.md) - Design patterns and principles
+- [Plot System Summary](PLOT_SYSTEM_SUMMARY.md) - Visualization engine details
+- [Canvas Functionality](CANVAS_FUNCTIONALITY_UPDATE.md) - Canvas features and drawing tools
+- [UX Implementation](UX_IMPLEMENTATION_SUMMARY.md) - User interface details
+- [UI Component Guide](UI_COMPONENT_GUIDE.md) - Visual guide to all UI components
+- [Error Handling](ERROR_HANDLING_IMPLEMENTATION_SUMMARY.md) - Error management system
+- [Code Quality Guide](CODE_QUALITY_GUIDE.md) - Best practices and conventions
 
-### Technical Guides
-- **[cross_agent_research/implementation_patterns.md](cross_agent_research/implementation_patterns.md)** - Ready-to-use code patterns
-- **[cross_agent_research/technical_questions_and_insights_*.md](cross_agent_research/)** - Deep technical research
+### Development Status
+- [Build Verification Report](BUILD_VERIFICATION_REPORT.md) - Latest build and test results
+- [Project Organization](PROJECT_ORGANIZATION.md) - Detailed crate architecture
+- [Functionality Verification](../FUNCTIONALITY_VERIFICATION.md) - Feature compliance check
+- [Final Build Status](FINAL_BUILD_STATUS.md) - Current build configuration
+- [Final Success Report](FINAL_SUCCESS_REPORT.md) - Implementation completion summary
 
-## 🎯 Quick Start for Developers
+## Key Features
 
-1. **Understand the Vision**: Start with [VISION.md](VISION.md)
-2. **Check Current Status**: Review [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
-3. **Focus on MVP**: Follow [CRITICAL_PATH.md](CRITICAL_PATH.md)
-4. **Use Code Patterns**: Reference [implementation_patterns.md](cross_agent_research/implementation_patterns.md)
+### Canvas System
+- **Drawing Tools**: Rectangle, Circle, Line, Draw (freehand), Text
+- **Node Types**: Table (with preview), Plot, Note, Shape
+- **Interactions**: Pan/zoom, right-click menus, node connections
+- **Smart Features**: Auto-layout, snap-to-grid, connection routing
 
-## 🏗️ Architecture Overview
+### Data Management
+- **Import**: CSV files with preview and configuration
+- **Configuration**: Header detection, delimiter selection, null handling
+- **Column Management**: Type inference, primary keys, constraints
+- **Preview**: Live data preview with green header highlighting
+
+### Visualization
+- **26 Plot Types**: From basic (line, bar) to advanced (violin, sankey)
+- **Customization**: Titles, labels, colors, themes
+- **Export**: PNG, SVG formats (temporarily disabled)
+- **Themes**: Light and dark modes
+
+## Project Structure
 
 ```
 pika-plot/
-├── pika-core/      # Core types and shared definitions
-├── pika-engine/    # Data processing and GPU coordination
-├── pika-ui/        # Canvas-based user interface
-├── pika-app/       # Main application entry point
-└── pika-cli/       # Command-line interface
+├── pika-app/        # Main GUI application
+├── pika-cli/        # Command-line interface
+├── pika-core/       # Core types and structures
+├── pika-engine/     # Data processing engine
+├── pika-ui/         # UI components and widgets
+├── docs/            # Documentation
+└── test_data/       # Sample data files
 ```
 
-## 🚀 Key Innovations
+## Testing
+- **45 Total Tests** across UI components
+- Comprehensive canvas drawing tests
+- Integration tests for workflows
+- See [pika-ui/tests/TEST_SUMMARY.md](../pika-ui/tests/TEST_SUMMARY.md) for details
 
-1. **Infinite Canvas** - Spatial workspace for data exploration
-2. **Visual Threads** - Color-coded connections between operations
-3. **GPU Everything** - Not just rendering, but computation
-4. **Unified Memory** - Intelligent RAM/VRAM coordination
-5. **Offline-First** - No cloud dependencies
+## Getting Started
 
-## 📊 Performance Targets
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/pika-plot.git
+   cd pika-plot
+   ```
 
-- 60 FPS with 1-5M points
-- Sub-second queries on GB datasets
-- Real-time interaction with cached data
-- Graceful degradation on lower-end hardware
+2. **Build the project**
+   ```bash
+   cargo build --release
+   ```
 
-## 🔍 Where to Find What
+3. **Run the application**
+   ```bash
+   ./run.bat  # Windows
+   ./run.sh   # Linux/macOS
+   ```
 
-### UI/UX Design
-- Canvas interaction: `pika-ui/src/panels/canvas.rs`
-- Node system: `pika-ui/src/state.rs`
-- Theme: `pika-ui/src/theme.rs`
+## Dependencies
+- Rust 1.70+
+- egui for UI
+- plotters for rendering
+- tokio for async operations
+- serde for serialization
 
-### Data Processing
-- SQL execution: `pika-engine/src/query.rs`
-- Import pipeline: `pika-engine/src/import.rs`
-- Memory management: `pika-engine/src/memory_coordinator.rs`
+## Contributing
+See our development guides:
+- Code follows Rust best practices
+- Tests required for new features
+- Documentation for public APIs
 
-### GPU Computing
-- Device management: `pika-engine/src/gpu/`
-- Shaders: `pika-engine/src/gpu/shaders/`
-- Aggregation: `pika-engine/src/aggregation.rs`
-
-## 🤝 Contributing
-
-Before contributing:
-1. Read the vision documents
-2. Check implementation status
-3. Follow the patterns in existing code
-4. Test with large datasets (1M+ rows)
-5. Ensure Windows 10/11 compatibility
-
-## 📝 Documentation TODO
-
-- [ ] API reference documentation
-- [ ] User guide with screenshots
-- [ ] Performance tuning guide
-- [ ] Plugin development guide
-- [ ] Data format specifications 
+## License
+[License information to be added] 

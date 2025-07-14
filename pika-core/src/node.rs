@@ -104,7 +104,7 @@ pub trait Node: Send + Sync {
     fn output_ports(&self) -> &[Port];
     
     /// Render the node UI
-    fn render(&mut self, ui: &mut egui::Ui, ctx: &NodeContext);
+    fn render_data(&mut self) -> Result<RenderData>;
     
     /// Handle incoming data on an input port
     fn accept_input(&mut self, port_id: &str, data: Arc<dyn Any + Send + Sync>) -> Result<()>;
@@ -135,6 +135,10 @@ pub trait DataNode: Node {
     
     /// Get the output data as an opaque handle
     fn output_data(&self) -> Option<Arc<dyn Any + Send + Sync>>;
+}
+
+pub struct RenderData {
+    pub data: Vec<u8>,
 }
 
 #[cfg(test)]

@@ -1,9 +1,12 @@
-//! Enhanced CSV processing with statistical analysis and type inference.
+//! Enhanced CSV processing with advanced features
 
+use pika_core::{
+    types::{ImportOptions, TableInfo, ColumnInfo},
+    error::Result,
+};
 use std::path::Path;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use pika_core::error::{PikaError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsvFileStats {
@@ -93,7 +96,7 @@ impl CsvAnalyzer {
     pub async fn analyze_file<P: AsRef<Path>>(&self, path: P) -> Result<CsvFileStats> {
         let path = path.as_ref();
         let file_size = std::fs::metadata(path)
-            .map_err(|e| PikaError::Io(e))?
+            .map_err(|e| pika_core::error::PikaError::Io(e))?
             .len();
         
         // Fast delimiter detection
@@ -103,7 +106,7 @@ impl CsvAnalyzer {
         let (sample_rows, has_header) = self.read_sample(path, delimiter)?;
         
         if sample_rows.is_empty() {
-            return Err(PikaError::DataProcessing("Empty CSV file".to_string()));
+            return Err(pika_core::error::PikaError::DataProcessing("Empty CSV file".to_string()));
         }
         
         let column_count = sample_rows[0].len();
@@ -127,7 +130,7 @@ impl CsvAnalyzer {
     
     fn detect_delimiter<P: AsRef<Path>>(&self, path: P) -> Result<char> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| PikaError::Io(e))?;
+            .map_err(|e| pika_core::error::PikaError::Io(e))?;
         
         let sample = content.lines().take(5).collect::<Vec<_>>().join("\n");
         
@@ -180,7 +183,7 @@ impl CsvAnalyzer {
             .delimiter(delimiter as u8)
             .has_headers(false)
             .from_path(path)
-            .map_err(|e| PikaError::DataProcessing(format!("Failed to read CSV: {}", e)))?;
+            .map_err(|e| pika_core::error::PikaError::DataProcessing(format!("Failed to read CSV: {}", e)))?;
         
         let mut rows = Vec::new();
         
@@ -466,5 +469,39 @@ impl CsvAnalyzer {
             mean,
             std_dev,
         }
+    }
+} 
+
+/// Enhanced CSV importer with advanced features
+pub struct EnhancedCsvImporter;
+
+impl EnhancedCsvImporter {
+    /// Create a new enhanced CSV importer
+    pub fn new() -> Self {
+        Self
+    }
+    
+    /// Import a CSV file with the given options
+    pub async fn import(&self, path: impl AsRef<Path>, options: ImportOptions) -> Result<TableInfo> {
+        let path = path.as_ref();
+        
+        // For now, return a basic TableInfo
+        // This will be enhanced with actual CSV parsing later
+        Ok(TableInfo {
+            name: path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("untitled")
+                .to_string(),
+            source_path: Some(path.to_path_buf()),
+            row_count: None,
+            columns: vec![
+                ColumnInfo {
+                    name: "placeholder".to_string(),
+                    data_type: "TEXT".to_string(),
+                    nullable: true,
+                }
+            ],
+            preview_data: None,
+        })
     }
 } 

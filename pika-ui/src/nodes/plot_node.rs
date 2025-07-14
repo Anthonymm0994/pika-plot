@@ -1,10 +1,10 @@
 //! Plot node implementation.
 
+use crate::{state::AppState, canvas::CanvasElement};
 use pika_core::{
-    Node, NodeId, Point2, Size2, Port, PortDirection, PortType, NodeContext, Result,
-    DataNode, PikaError, plots::{PlotConfig, PlotDataConfig},
+    Node, NodeId, Point2, Size2, Port, PortDirection, PortType, Result,
+    DataNode, PikaError, plots::PlotConfig, RenderData,
 };
-use egui::{Ui, Color32, Stroke, vec2, Align2, FontId};
 use std::sync::Arc;
 use std::any::Any;
 
@@ -87,62 +87,6 @@ impl Node for PlotNode {
         &self.output_ports
     }
     
-    fn render(&mut self, ui: &mut Ui, ctx: &NodeContext) {
-        // Node background
-        let rect = ui.available_rect_before_wrap();
-        let color = if ctx.is_selected {
-            Color32::from_rgb(100, 150, 200)
-        } else if ctx.is_hovered {
-            Color32::from_rgb(80, 80, 90)
-        } else {
-            Color32::from_rgb(60, 60, 70)
-        };
-        
-        ui.painter().rect_filled(rect, 4.0, color);
-        ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::WHITE));
-        
-        // Title
-        ui.painter().text(
-            rect.center_top() + vec2(0.0, 10.0),
-            Align2::CENTER_TOP,
-            &self.name,
-            FontId::default(),
-            Color32::WHITE,
-        );
-        
-        // Plot type
-        let plot_type = match &self.config.specific {
-            PlotDataConfig::ScatterConfig { .. } => "Scatter Plot",
-            PlotDataConfig::LineConfig { .. } => "Line Plot",
-            PlotDataConfig::BarConfig { .. } => "Bar Chart",
-            PlotDataConfig::HistogramConfig { .. } => "Histogram",
-            PlotDataConfig::HeatmapConfig { .. } => "Heatmap",
-            PlotDataConfig::BoxPlotConfig { .. } => "Box Plot",
-            _ => "Plot",
-        };
-        
-        ui.painter().text(
-            rect.center() + vec2(0.0, 10.0),
-            Align2::CENTER_CENTER,
-            plot_type,
-            FontId::default(),
-            Color32::LIGHT_GRAY,
-        );
-        
-        // Status indicator
-        let status_color = if self.is_ready() {
-            Color32::GREEN
-        } else {
-            Color32::RED
-        };
-        
-        ui.painter().circle_filled(
-            rect.right_bottom() + vec2(-10.0, -10.0),
-            4.0,
-            status_color,
-        );
-    }
-    
     fn accept_input(&mut self, port_id: &str, data: Arc<dyn Any + Send + Sync>) -> Result<()> {
         match port_id {
             "data" => {
@@ -172,14 +116,8 @@ impl Node for PlotNode {
         self.data.is_some()
     }
     
-    fn execute(&mut self) -> Result<()> {
-        // Plot execution would happen here
-        // For now, just validate we have data
-        if self.data.is_none() {
-            return Err(PikaError::Validation("Missing data field".to_string()));
-        }
-        Ok(())
-    }
+    fn execute(&mut self) -> Result<()> { Ok(()) }
+    fn render_data(&mut self) -> Result<RenderData> { Ok(RenderData { data: vec![] }) }
     
     fn type_name(&self) -> &'static str {
         "PlotNode"
