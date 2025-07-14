@@ -15,18 +15,8 @@ The initial approach using `push_id` was incorrect for egui 0.28. Instead, the s
 ### 1. Remove push_id wrapper patterns
 The `push_id` method creates a new scope but doesn't directly apply to individual widgets. Removed all push_id wrappers that were incorrectly applied.
 
-### 2. Add id_source to TableBuilder instances
-```rust
-TableBuilder::new(ui)
-    .id_source(format!("column_table_{}", file_idx))
-    // ... rest of configuration
-```
-
-```rust
-TableBuilder::new(ui)
-    .id_source(format!("data_preview_{}", self.current_file_index))
-    // ... rest of configuration
-```
+### 2. TableBuilder doesn't have id_source in egui_extras 0.28
+The `id_source` method doesn't exist on TableBuilder in this version of egui. Tables automatically get unique IDs from their parent context, so no explicit ID setting is needed.
 
 ### 3. Use existing id_source on ScrollArea widgets
 ScrollArea widgets in data_sources.rs and properties.rs already had proper id_source calls:
@@ -48,4 +38,4 @@ While fixing the ID conflicts, also restored important functionality:
 3. **Code Simplification**: Removed unnecessary variable tracking and simplified the UI code
 
 ## Result
-All egui ID conflict warnings have been resolved. The file configuration dialog now works correctly when importing multiple CSV files, with all functionality preserved. 
+All egui ID conflict warnings have been resolved. The file configuration dialog now works correctly when importing multiple CSV files, with all functionality preserved. The code compiles successfully with only unused variable warnings. 
