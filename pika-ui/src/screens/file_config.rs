@@ -20,6 +20,8 @@ pub struct FileConfigScreen {
     error_message: Option<String>,
     /// Preview data cache
     preview_cache: HashMap<PathBuf, PreviewData>,
+    /// Whether we need to show the file picker on initialization
+    show_file_picker_on_init: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +137,7 @@ impl FileConfigScreen {
             database_path: default_path,
             error_message: None,
             preview_cache: HashMap::new(),
+            show_file_picker_on_init: true,
         }
     }
 
@@ -164,6 +167,24 @@ impl FileConfigScreen {
     pub fn show(&mut self, ctx: &egui::Context, state: &mut AppState) -> Option<Vec<TableInfo>> {
         let mut result = None;
 
+        // Show file picker immediately on first show if no files loaded
+        if self.show_file_picker_on_init && self.files.is_empty() {
+            self.show_file_picker_on_init = false;
+            if let Some(paths) = rfd::FileDialog::new()
+                .add_filter("CSV files", &["csv", "tsv", "txt"])
+                .pick_files()
+            {
+                for path in paths {
+                    self.add_file(path);
+                }
+            }
+            // If no files selected, go back to canvas
+            if self.files.is_empty() {
+                state.view_mode = crate::state::ViewMode::Canvas;
+                return None;
+            }
+        }
+
         // Dark theme window
         let frame = egui::Frame::none()
             .fill(Color32::from_rgb(30, 30, 30))
@@ -189,9 +210,10 @@ impl FileConfigScreen {
                     ui.label(RichText::new("Database Path:").color(Color32::from_gray(200)));
                     ui.add_space(10.0);
                     
+                    let available_width = ui.available_width() - 100.0; // Leave space for Browse button
                     let path_display = self.database_path.to_string_lossy().to_string();
                     ui.add(egui::TextEdit::singleline(&mut path_display.clone())
-                        .desired_width(400.0)
+                        .desired_width(available_width.min(400.0))
                         .interactive(false)
                         .text_color(Color32::from_gray(180)));
                     
@@ -207,15 +229,23 @@ impl FileConfigScreen {
 
                 ui.add_space(10.0);
 
-                // Main content area
-                ui.columns(2, |columns| {
+                // Use available space for the main content
+                let available_size = ui.available_size();
+                let left_width = (available_size.x * 0.45).min(500.0).max(350.0);
+                let right_width = available_size.x - left_width - 10.0;
+
+                ui.horizontal_top(|ui| {
                     // Left column - Configuration
-                    columns[0].vertical(|ui| {
-                        self.render_configuration_panel(ui);
+                    ui.allocate_ui(egui::vec2(left_width, available_size.y - 50.0), |ui| {
+                        ui.vertical(|ui| {
+                            self.render_configuration_panel(ui);
+                        });
                     });
 
+                    ui.add_space(10.0);
+
                     // Right column - Preview
-                    columns[1].vertical(|ui| {
+                    ui.allocate_ui(egui::vec2(right_width, available_size.y - 50.0), |ui| {
                         ui.group(|ui| {
                             ui.heading(RichText::new("Data Preview").color(Color32::from_gray(200)));
                             ui.separator();
@@ -255,22 +285,6 @@ impl FileConfigScreen {
                 if let Some(error) = &self.error_message {
                     ui.colored_label(Color32::from_rgb(255, 100, 100), error);
                 }
-
-                // Initial file selection dialog
-                if self.files.is_empty() {
-                    ui.centered_and_justified(|ui| {
-                        if ui.button(RichText::new("Select CSV Files...").size(16.0)).clicked() {
-                            if let Some(paths) = rfd::FileDialog::new()
-                                .add_filter("CSV files", &["csv", "tsv", "txt"])
-                                .pick_files()
-                            {
-                                for path in paths {
-                                    self.add_file(path);
-                                }
-                            }
-                        }
-                    });
-                }
             });
 
         result
@@ -291,7 +305,7 @@ impl FileConfigScreen {
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
             
-            egui::ComboBox::from_label("")
+            egui::ComboBox::from_id_source("csv_file_selector")
                 .selected_text(file_name)
                 .show_ui(ui, |ui| {
                     for (idx, file) in self.files.iter().enumerate() {
@@ -340,7 +354,9 @@ impl FileConfigScreen {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Table Name:").color(Color32::from_gray(200)));
                 ui.add_space(10.0);
-                ui.text_edit_singleline(&mut file.table_name);
+                ui.push_id(format!("table_name_{}", self.current_file_index), |ui| {
+                    ui.text_edit_singleline(&mut file.table_name);
+                });
             });
 
             ui.add_space(10.0);
@@ -350,15 +366,17 @@ impl FileConfigScreen {
                 ui.heading(RichText::new("Header Configuration").color(Color32::from_gray(200)));
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Header Row:").color(Color32::from_gray(180)));
-                    let response = ui.add(egui::DragValue::new(&mut file.header_row)
-                        .speed(1.0)
-                        .range(1..=50));
-                    ui.label(RichText::new("(1-50)").color(Color32::from_gray(150)));
-                    
-                    // Check if header row changed
-                    if response.changed() && file.header_row != prev_header_row {
-                        need_reload = true;
-                    }
+                    ui.push_id(format!("header_row_{}", self.current_file_index), |ui| {
+                        let response = ui.add(egui::DragValue::new(&mut file.header_row)
+                            .speed(1.0)
+                            .range(1..=50));
+                        ui.label(RichText::new("(1-50)").color(Color32::from_gray(150)));
+                        
+                        // Check if header row changed
+                        if response.changed() && file.header_row != prev_header_row {
+                            need_reload = true;
+                        }
+                    });
                 });
                 ui.label(RichText::new("The green highlighted row in the preview is your header")
                     .color(Color32::from_gray(150))
@@ -370,13 +388,17 @@ impl FileConfigScreen {
             // Sample size and delimiter
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Sample Size:").color(Color32::from_gray(200)));
-                ui.add(egui::DragValue::new(&mut file.sample_size)
-                    .speed(100.0)
-                    .range(100..=10000));
+                ui.push_id(format!("sample_size_{}", self.current_file_index), |ui| {
+                    ui.add(egui::DragValue::new(&mut file.sample_size)
+                        .speed(100.0)
+                        .range(100..=10000));
+                });
                 ui.label("rows");
-                if ui.button("🔄 Resample").clicked() {
-                    need_reload = true;
-                }
+                ui.push_id(format!("resample_{}", self.current_file_index), |ui| {
+                    if ui.button("🔄 Resample").clicked() {
+                        need_reload = true;
+                    }
+                });
             });
 
             ui.add_space(10.0);
@@ -384,13 +406,31 @@ impl FileConfigScreen {
             // Delimiter
             ui.label(RichText::new("Delimiter:").color(Color32::from_gray(200)));
             ui.horizontal(|ui| {
-                let comma_changed = ui.radio_value(&mut file.delimiter, Delimiter::Comma, "⚪ Comma").changed();
-                let tab_changed = ui.radio_value(&mut file.delimiter, Delimiter::Tab, "⚪ Tab").changed();
-                let semi_changed = ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "⚪ Semicolon").changed();
-                let pipe_changed = ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "⚪ Pipe").changed();
+                let mut delimiter_changed = false;
+                
+                ui.push_id(format!("delimiter_comma_{}", self.current_file_index), |ui| {
+                    if ui.radio_value(&mut file.delimiter, Delimiter::Comma, "⚪ Comma").changed() {
+                        delimiter_changed = true;
+                    }
+                });
+                ui.push_id(format!("delimiter_tab_{}", self.current_file_index), |ui| {
+                    if ui.radio_value(&mut file.delimiter, Delimiter::Tab, "⚪ Tab").changed() {
+                        delimiter_changed = true;
+                    }
+                });
+                ui.push_id(format!("delimiter_semi_{}", self.current_file_index), |ui| {
+                    if ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "⚪ Semicolon").changed() {
+                        delimiter_changed = true;
+                    }
+                });
+                ui.push_id(format!("delimiter_pipe_{}", self.current_file_index), |ui| {
+                    if ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "⚪ Pipe").changed() {
+                        delimiter_changed = true;
+                    }
+                });
                 
                 // Check if delimiter changed
-                if (comma_changed || tab_changed || semi_changed || pipe_changed) && file.delimiter != prev_delimiter {
+                if delimiter_changed && file.delimiter != prev_delimiter {
                     need_reload = true;
                 }
             });
@@ -401,10 +441,18 @@ impl FileConfigScreen {
             ui.group(|ui| {
                 ui.heading(RichText::new("Null Values").color(Color32::from_gray(200)));
                 ui.label(RichText::new("Values to treat as NULL:").color(Color32::from_gray(180)));
-                ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
-                ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
-                ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
-                ui.checkbox(&mut file.null_values.na, "☐ N/A");
+                ui.push_id(format!("empty_string_{}", self.current_file_index), |ui| {
+                    ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
+                });
+                ui.push_id(format!("null_text_{}", self.current_file_index), |ui| {
+                    ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
+                });
+                ui.push_id(format!("lowercase_null_{}", self.current_file_index), |ui| {
+                    ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
+                });
+                ui.push_id(format!("na_{}", self.current_file_index), |ui| {
+                    ui.checkbox(&mut file.null_values.na, "☐ N/A");
+                });
             });
         }
 
@@ -427,19 +475,23 @@ impl FileConfigScreen {
             ui.group(|ui| {
                 ui.heading(RichText::new("Column Selection").color(Color32::from_gray(200)));
                 ui.horizontal(|ui| {
-                    if ui.button("Select All").clicked() {
-                        for col in &mut file.columns {
-                            col.include = true;
+                    ui.push_id(format!("select_all_{}", self.current_file_index), |ui| {
+                        if ui.button("Select All").clicked() {
+                            for col in &mut file.columns {
+                                col.include = true;
+                            }
                         }
-                    }
-                    if ui.button("Deselect All").clicked() {
-                        for col in &mut file.columns {
-                            col.include = false;
+                    });
+                    ui.push_id(format!("deselect_all_{}", self.current_file_index), |ui| {
+                        if ui.button("Deselect All").clicked() {
+                            for col in &mut file.columns {
+                                col.include = false;
+                            }
                         }
-                    }
-                    let selected = file.columns.iter().filter(|c| c.include).count();
-                    ui.label(RichText::new(format!("{}/{} selected", selected, file.columns.len()))
-                        .color(Color32::from_gray(150)));
+                    });
+                    
+                    let selected_count = file.columns.iter().filter(|c| c.include).count();
+                    ui.label(format!("{}/{} selected", selected_count, file.columns.len()));
                 });
 
                 ui.separator();
@@ -484,7 +536,9 @@ impl FileConfigScreen {
                     let row_index = row.index();
                     
                     row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].include, "");
+                        ui.push_id(format!("include_{}_{}", file_idx, row_index), |ui| {
+                            ui.checkbox(&mut file.columns[row_index].include, "");
+                        });
                     });
                     
                     row.col(|ui| {
@@ -493,7 +547,7 @@ impl FileConfigScreen {
                     
                     row.col(|ui| {
                         let current_type = file.columns[row_index].data_type;
-                        egui::ComboBox::from_id_source(format!("type_{}", row_index))
+                        egui::ComboBox::from_id_source(format!("type_{}_{}", file_idx, row_index))
                             .selected_text(current_type.as_str())
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut file.columns[row_index].data_type, ColumnType::Integer, "Integer");
@@ -507,28 +561,36 @@ impl FileConfigScreen {
                     
                     row.col(|ui| {
                         let was_pk = file.columns[row_index].is_primary_key;
-                        if ui.checkbox(&mut file.columns[row_index].is_primary_key, "").changed() {
-                            if file.columns[row_index].is_primary_key && !was_pk {
-                                // Unset other PKs
-                                for idx in 0..num_cols {
-                                    if idx != row_index {
-                                        file.columns[idx].is_primary_key = false;
+                        ui.push_id(format!("pk_{}_{}", file_idx, row_index), |ui| {
+                            if ui.checkbox(&mut file.columns[row_index].is_primary_key, "").changed() {
+                                if file.columns[row_index].is_primary_key && !was_pk {
+                                    // Unset other PKs
+                                    for idx in 0..num_cols {
+                                        if idx != row_index {
+                                            file.columns[idx].is_primary_key = false;
+                                        }
                                     }
                                 }
                             }
-                        }
+                        });
                     });
                     
                     row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].not_null, "");
+                        ui.push_id(format!("not_null_{}_{}", file_idx, row_index), |ui| {
+                            ui.checkbox(&mut file.columns[row_index].not_null, "");
+                        });
                     });
                     
                     row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].unique, "");
+                        ui.push_id(format!("unique_{}_{}", file_idx, row_index), |ui| {
+                            ui.checkbox(&mut file.columns[row_index].unique, "");
+                        });
                     });
                     
                     row.col(|ui| {
-                        ui.checkbox(&mut file.columns[row_index].create_index, "");
+                        ui.push_id(format!("index_{}_{}", file_idx, row_index), |ui| {
+                            ui.checkbox(&mut file.columns[row_index].create_index, "");
+                        });
                     });
                 });
             });
@@ -544,11 +606,9 @@ impl FileConfigScreen {
                     .striped(true)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::exact(40.0)) // Row number
                     .columns(Column::auto(), preview.headers.len())
                     .max_scroll_height(available_height)
                     .header(20.0, |mut header| {
-                        header.col(|ui| { ui.label(""); }); // Empty for row numbers
                         for col_name in &preview.headers {
                             header.col(|ui| {
                                 ui.label(RichText::new(col_name).strong());
@@ -556,31 +616,11 @@ impl FileConfigScreen {
                         }
                     })
                     .body(|mut body| {
-                        // Calculate the starting row number based on header row
-                        let start_row_num = file.header_row.saturating_sub(1) + 1;
-                        
                         for (idx, data_row) in preview.rows.iter().enumerate() {
-                            let actual_row_num = start_row_num + idx;
-                            let is_header_row = actual_row_num == file.header_row;
-                            
                             body.row(18.0, |mut row| {
-                                row.col(|ui| {
-                                    if is_header_row {
-                                        ui.label(RichText::new(format!("{}", actual_row_num))
-                                            .background_color(Color32::from_rgb(50, 100, 50)));
-                                    } else {
-                                        ui.label(format!("{}", actual_row_num));
-                                    }
-                                });
-                                
                                 for cell in data_row.iter() {
                                     row.col(|ui| {
-                                        if is_header_row {
-                                            ui.label(RichText::new(cell)
-                                                .background_color(Color32::from_rgb(50, 100, 50)));
-                                        } else {
-                                            ui.label(cell);
-                                        }
+                                        ui.label(cell);
                                     });
                                 }
                             });
@@ -622,14 +662,13 @@ impl FileConfigScreen {
                         .collect();
                 }
 
-                // Parse rows for preview, starting from the data row (after header)
-                // We show the header row in the preview for highlighting, plus data rows
-                let start_row = file.header_row.saturating_sub(1); // Include header row
-                let end_row = (file.header_row + file.sample_size).min(lines.len());
+                // Parse rows for preview, starting AFTER the header row
+                let start_row = file.header_row; // Start after header
+                let end_row = (start_row + file.sample_size).min(lines.len());
                 
-                for (idx, line) in lines.iter().enumerate() {
-                    if idx >= start_row && idx < end_row {
-                        let cells: Vec<String> = line
+                for idx in start_row..end_row {
+                    if idx < lines.len() {
+                        let cells: Vec<String> = lines[idx]
                             .split(file.delimiter.as_char())
                             .map(|s| s.trim().to_string())
                             .collect();
@@ -657,21 +696,18 @@ impl FileConfigScreen {
         if let Some(preview) = &file.preview_data {
             file.columns.clear();
             
-            // Infer types from data rows (skip header row)
-            let data_rows: Vec<&Vec<String>> = preview.rows.iter()
-                .enumerate()
-                .filter(|(idx, _)| *idx != file.header_row - 1)
-                .map(|(_, row)| row)
-                .collect();
+            // Infer types from data rows (all rows are now data rows, no header)
+            let data_rows: Vec<&Vec<String>> = preview.rows.iter().collect();
             
             for (i, header) in preview.headers.iter().enumerate() {
                 let column_type = self.infer_column_type(&data_rows, i);
+                let is_id_column = header.to_lowercase() == "id";
                 
                 file.columns.push(ColumnConfig {
                     name: header.clone(),
                     data_type: column_type,
                     include: true,
-                    is_primary_key: i == 0, // First column as default PK
+                    is_primary_key: is_id_column, // Set id column as primary key
                     not_null: false,
                     unique: false,
                     create_index: false,
@@ -730,15 +766,8 @@ impl FileConfigScreen {
             if !columns.is_empty() {
                 // Create preview data from the loaded data
                 let preview_data = file.preview_data.as_ref().map(|p| {
-                    // Skip header row if present
-                    let data_start = if file.header_row > 0 && file.header_row <= p.rows.len() {
-                        file.header_row
-                    } else {
-                        0
-                    };
-                    
                     pika_core::types::TablePreview {
-                        rows: p.rows[data_start..]
+                        rows: p.rows
                             .iter()
                             .take(25) // Take first 25 rows for preview
                             .cloned()
@@ -751,7 +780,7 @@ impl FileConfigScreen {
                 let table_info = TableInfo {
                     name: file.table_name.clone(),
                     source_path: Some(file.path.clone()),
-                    row_count: file.preview_data.as_ref().map(|p| p.rows.len() - file.header_row + 1),
+                    row_count: file.preview_data.as_ref().map(|p| p.rows.len()),
                     columns,
                     preview_data,
                 };

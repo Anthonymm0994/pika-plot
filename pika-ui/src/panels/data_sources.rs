@@ -48,6 +48,7 @@ impl DataSourcesPanel {
             
             // Table list
             ScrollArea::vertical()
+                .id_source("data_sources_table_list")
                 .max_height(200.0)
                 .show(ui, |ui| {
                     // Collect node info to avoid borrow issues
@@ -86,7 +87,7 @@ impl DataSourcesPanel {
                                     let canvas_node = crate::state::CanvasNode {
                                         id: node_id,
                                         position: egui::Vec2::new(200.0 + offset, 200.0 + offset),
-                                        size: egui::Vec2::new(200.0, 150.0),
+                                        size: egui::Vec2::new(600.0, 400.0), // Larger size like Pebble
                                         node_type: crate::state::CanvasNodeType::Table { 
                                             table_info: table_info.clone()
                                         },
@@ -101,7 +102,10 @@ impl DataSourcesPanel {
                     }
                     
                     if state.data_nodes.is_empty() {
-                        ui.label("No tables loaded");
+                        ui.separator();
+                        ui.label("No data sources loaded");
+                        ui.add_space(10.0);
+                        ui.label("Import CSV files or open a database to get started.");
                     }
                 });
         });
@@ -135,6 +139,7 @@ impl DataSourcesPanel {
                 ui.label("▾ Column Details");
                 
                 ScrollArea::vertical()
+                    .id_source(format!("column_details_{:?}", node.id))
                     .max_height(150.0)
                     .show(ui, |ui| {
                         for col in &node.table_info.columns {

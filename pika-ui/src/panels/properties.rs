@@ -4,6 +4,7 @@ use egui::{Ui, TextEdit, ScrollArea};
 use crate::state::{AppState, CanvasNodeType};
 use crate::panels::canvas_panel::AppEvent;
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::Sender;
 
 pub struct PropertiesPanel;
 
@@ -12,33 +13,40 @@ impl PropertiesPanel {
         Self
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, _event_tx: &broadcast::Sender<AppEvent>) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, event_tx: &Sender<AppEvent>) {
         ui.heading("Properties");
         
         ui.separator();
         
-        if let Some(selected_node_id) = &state.selected_node {
-            if let Some(node) = state.get_canvas_node_mut(*selected_node_id) {
+        if let Some(selected_node_id) = state.selected_node.clone() {
+            if let Some(node) = state.get_canvas_node_mut(selected_node_id) {
                 match &mut node.node_type {
                     CanvasNodeType::Table { table_info } => {
-                        ui.label("📊 Table Node");
+                        ui.label(format!("Table: {}", table_info.name));
+                        ui.label(format!("Rows: {:?}", table_info.row_count));
                         ui.separator();
+                        ui.label("Position:");
+                        ui.horizontal(|ui| {
+                            ui.label("X:");
+                            ui.add(egui::DragValue::new(&mut node.position.x));
+                            ui.label("Y:");
+                            ui.add(egui::DragValue::new(&mut node.position.y));
+                        });
                         
-                        ui.label(format!("Name: {}", table_info.name));
-                        ui.label(format!("Source: {}", 
-                            table_info.source_path.as_ref()
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_else(|| "Unknown".to_string())
-                        ));
-                        ui.label(format!("Rows: {}", 
-                            table_info.row_count.map_or("Unknown".to_string(), |n| n.to_string())
-                        ));
-                        ui.label(format!("Columns: {}", table_info.columns.len()));
+                        ui.separator();
+                        ui.label("Size:");
+                        ui.horizontal(|ui| {
+                            ui.label("Width:");
+                            ui.add(egui::DragValue::new(&mut node.size.x).range(50.0..=800.0));
+                            ui.label("Height:");
+                            ui.add(egui::DragValue::new(&mut node.size.y).range(50.0..=600.0));
+                        });
                         
                         ui.separator();
                         ui.label("Column Details:");
                         
                         ScrollArea::vertical()
+                            .id_source(format!("properties_columns_{:?}", selected_node_id))
                             .max_height(200.0)
                             .show(ui, |ui| {
                                 for column in &table_info.columns {
@@ -53,7 +61,7 @@ impl PropertiesPanel {
                             });
                     }
                     CanvasNodeType::Plot { plot_type } => {
-                        ui.label("📊 Plot Node");
+                        ui.label("📈 Plot");
                         ui.separator();
                         
                         ui.horizontal(|ui| {
