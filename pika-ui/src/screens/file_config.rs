@@ -354,9 +354,7 @@ impl FileConfigScreen {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Table Name:").color(Color32::from_gray(200)));
                 ui.add_space(10.0);
-                ui.push_id(format!("table_name_{}", self.current_file_index), |ui| {
-                    ui.text_edit_singleline(&mut file.table_name);
-                });
+                ui.text_edit_singleline(&mut file.table_name);
             });
 
             ui.add_space(10.0);
@@ -366,17 +364,14 @@ impl FileConfigScreen {
                 ui.heading(RichText::new("Header Configuration").color(Color32::from_gray(200)));
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Header Row:").color(Color32::from_gray(180)));
-                    ui.push_id(format!("header_row_{}", self.current_file_index), |ui| {
-                        let response = ui.add(egui::DragValue::new(&mut file.header_row)
-                            .speed(1.0)
-                            .range(1..=50));
-                        ui.label(RichText::new("(1-50)").color(Color32::from_gray(150)));
-                        
-                        // Check if header row changed
-                        if response.changed() && file.header_row != prev_header_row {
-                            need_reload = true;
-                        }
-                    });
+                    let response = ui.add(egui::DragValue::new(&mut file.header_row)
+                        .clamp_range(1..=50));
+                    ui.label(RichText::new("(1-50)").color(Color32::from_gray(128)));
+                    
+                    // Check if header row changed
+                    if response.changed() {
+                        need_reload = true;
+                    }
                 });
                 ui.label(RichText::new("The green highlighted row in the preview is your header")
                     .color(Color32::from_gray(150))
@@ -385,20 +380,16 @@ impl FileConfigScreen {
 
             ui.add_space(10.0);
 
-            // Sample size and delimiter
+            // Sample size
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Sample Size:").color(Color32::from_gray(200)));
-                ui.push_id(format!("sample_size_{}", self.current_file_index), |ui| {
-                    ui.add(egui::DragValue::new(&mut file.sample_size)
-                        .speed(100.0)
-                        .range(100..=10000));
-                });
+                ui.add(egui::DragValue::new(&mut file.sample_size)
+                    .clamp_range(10..=10000)
+                    .speed(10));
                 ui.label("rows");
-                ui.push_id(format!("resample_{}", self.current_file_index), |ui| {
-                    if ui.button("🔄 Resample").clicked() {
-                        need_reload = true;
-                    }
-                });
+                if ui.button("↻ Resample").clicked() {
+                    need_reload = true;
+                }
             });
 
             ui.add_space(10.0);
@@ -408,26 +399,18 @@ impl FileConfigScreen {
             ui.horizontal(|ui| {
                 let mut delimiter_changed = false;
                 
-                ui.push_id(format!("delimiter_comma_{}", self.current_file_index), |ui| {
-                    if ui.radio_value(&mut file.delimiter, Delimiter::Comma, "⚪ Comma").changed() {
-                        delimiter_changed = true;
-                    }
-                });
-                ui.push_id(format!("delimiter_tab_{}", self.current_file_index), |ui| {
-                    if ui.radio_value(&mut file.delimiter, Delimiter::Tab, "⚪ Tab").changed() {
-                        delimiter_changed = true;
-                    }
-                });
-                ui.push_id(format!("delimiter_semi_{}", self.current_file_index), |ui| {
-                    if ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "⚪ Semicolon").changed() {
-                        delimiter_changed = true;
-                    }
-                });
-                ui.push_id(format!("delimiter_pipe_{}", self.current_file_index), |ui| {
-                    if ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "⚪ Pipe").changed() {
-                        delimiter_changed = true;
-                    }
-                });
+                if ui.radio_value(&mut file.delimiter, Delimiter::Comma, "⚪ Comma").changed() {
+                    delimiter_changed = true;
+                }
+                if ui.radio_value(&mut file.delimiter, Delimiter::Tab, "⚪ Tab").changed() {
+                    delimiter_changed = true;
+                }
+                if ui.radio_value(&mut file.delimiter, Delimiter::Semicolon, "⚪ Semicolon").changed() {
+                    delimiter_changed = true;
+                }
+                if ui.radio_value(&mut file.delimiter, Delimiter::Pipe, "⚪ Pipe").changed() {
+                    delimiter_changed = true;
+                }
                 
                 // Check if delimiter changed
                 if delimiter_changed && file.delimiter != prev_delimiter {
@@ -441,18 +424,10 @@ impl FileConfigScreen {
             ui.group(|ui| {
                 ui.heading(RichText::new("Null Values").color(Color32::from_gray(200)));
                 ui.label(RichText::new("Values to treat as NULL:").color(Color32::from_gray(180)));
-                ui.push_id(format!("empty_string_{}", self.current_file_index), |ui| {
-                    ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
-                });
-                ui.push_id(format!("null_text_{}", self.current_file_index), |ui| {
-                    ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
-                });
-                ui.push_id(format!("lowercase_null_{}", self.current_file_index), |ui| {
-                    ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
-                });
-                ui.push_id(format!("na_{}", self.current_file_index), |ui| {
-                    ui.checkbox(&mut file.null_values.na, "☐ N/A");
-                });
+                ui.checkbox(&mut file.null_values.empty_string, "☐ [empty string]");
+                ui.checkbox(&mut file.null_values.null_text, "☐ NULL");
+                ui.checkbox(&mut file.null_values.lowercase_null, "☐ null");
+                ui.checkbox(&mut file.null_values.na, "☐ N/A");
             });
         }
 
@@ -475,26 +450,23 @@ impl FileConfigScreen {
             ui.group(|ui| {
                 ui.heading(RichText::new("Column Selection").color(Color32::from_gray(200)));
                 ui.horizontal(|ui| {
-                    ui.push_id(format!("select_all_{}", self.current_file_index), |ui| {
-                        if ui.button("Select All").clicked() {
-                            for col in &mut file.columns {
-                                col.include = true;
-                            }
+                    if ui.button("Select All").clicked() {
+                        for col in &mut file.columns {
+                            col.include = true;
                         }
-                    });
-                    ui.push_id(format!("deselect_all_{}", self.current_file_index), |ui| {
-                        if ui.button("Deselect All").clicked() {
-                            for col in &mut file.columns {
-                                col.include = false;
-                            }
+                    }
+                    if ui.button("Deselect All").clicked() {
+                        for col in &mut file.columns {
+                            col.include = false;
                         }
-                    });
+                    }
                     
-                    let selected_count = file.columns.iter().filter(|c| c.include).count();
-                    ui.label(format!("{}/{} selected", selected_count, file.columns.len()));
+                    ui.add_space(20.0);
+                    ui.label(format!("{}/{} selected", 
+                        file.columns.iter().filter(|c| c.include).count(),
+                        file.columns.len()
+                    ));
                 });
-
-                ui.separator();
             });
         }
 
@@ -518,15 +490,9 @@ impl FileConfigScreen {
                 .column(Column::exact(70.0)) // Not Null
                 .column(Column::exact(60.0)) // Unique
                 .column(Column::exact(50.0)) // Index
-                .header(20.0, |mut header| {
-                    header.col(|ui| { ui.label("Include"); });
-                    header.col(|ui| { ui.label("Column"); });
-                    header.col(|ui| { ui.label("Type"); });
-                    header.col(|ui| { ui.label("PK"); });
-                    header.col(|ui| { ui.label("Not Null"); });
-                    header.col(|ui| { ui.label("Unique"); });
-                    header.col(|ui| { ui.label("Index"); });
-                });
+                .min_scrolled_height(200.0)
+                .max_scroll_height(300.0)
+                .id_source(format!("column_table_{}", file_idx));
 
             table.body(|body| {
                 let row_height = text_height + 8.0;
@@ -536,9 +502,7 @@ impl FileConfigScreen {
                     let row_index = row.index();
                     
                     row.col(|ui| {
-                        ui.push_id(format!("include_{}_{}", file_idx, row_index), |ui| {
-                            ui.checkbox(&mut file.columns[row_index].include, "");
-                        });
+                        ui.checkbox(&mut file.columns[row_index].include, "");
                     });
                     
                     row.col(|ui| {
@@ -561,36 +525,28 @@ impl FileConfigScreen {
                     
                     row.col(|ui| {
                         let was_pk = file.columns[row_index].is_primary_key;
-                        ui.push_id(format!("pk_{}_{}", file_idx, row_index), |ui| {
-                            if ui.checkbox(&mut file.columns[row_index].is_primary_key, "").changed() {
-                                if file.columns[row_index].is_primary_key && !was_pk {
-                                    // Unset other PKs
-                                    for idx in 0..num_cols {
-                                        if idx != row_index {
-                                            file.columns[idx].is_primary_key = false;
-                                        }
+                        if ui.checkbox(&mut file.columns[row_index].is_primary_key, "").changed() {
+                            if file.columns[row_index].is_primary_key && !was_pk {
+                                // Unset other PKs - only one column can be primary key
+                                for (idx, col) in file.columns.iter_mut().enumerate() {
+                                    if idx != row_index {
+                                        col.is_primary_key = false;
                                     }
                                 }
                             }
-                        });
+                        }
                     });
                     
                     row.col(|ui| {
-                        ui.push_id(format!("not_null_{}_{}", file_idx, row_index), |ui| {
-                            ui.checkbox(&mut file.columns[row_index].not_null, "");
-                        });
+                        ui.checkbox(&mut file.columns[row_index].not_null, "");
                     });
                     
                     row.col(|ui| {
-                        ui.push_id(format!("unique_{}_{}", file_idx, row_index), |ui| {
-                            ui.checkbox(&mut file.columns[row_index].unique, "");
-                        });
+                        ui.checkbox(&mut file.columns[row_index].unique, "");
                     });
                     
                     row.col(|ui| {
-                        ui.push_id(format!("index_{}_{}", file_idx, row_index), |ui| {
-                            ui.checkbox(&mut file.columns[row_index].create_index, "");
-                        });
+                        ui.checkbox(&mut file.columns[row_index].create_index, "");
                     });
                 });
             });
@@ -608,6 +564,7 @@ impl FileConfigScreen {
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .columns(Column::auto(), preview.headers.len())
                     .max_scroll_height(available_height)
+                    .id_source(format!("data_preview_{}", self.current_file_index))
                     .header(20.0, |mut header| {
                         for col_name in &preview.headers {
                             header.col(|ui| {
