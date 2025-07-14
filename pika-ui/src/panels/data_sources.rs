@@ -50,19 +50,21 @@ impl DataSourcesPanel {
             ScrollArea::vertical()
                 .max_height(200.0)
                 .show(ui, |ui| {
-                    for node in &state.data_nodes {
-                        let name = &node.table_info.name;
-                        
-                        // Filter by search query
-                        if !self.search_query.is_empty() && 
-                           !name.to_lowercase().contains(&self.search_query.to_lowercase()) {
-                            continue;
-                        }
-                        
+                    // Collect node info to avoid borrow issues
+                    let nodes_info: Vec<_> = state.data_nodes.iter()
+                        .filter(|node| {
+                            let name = &node.table_info.name;
+                            self.search_query.is_empty() || 
+                            name.to_lowercase().contains(&self.search_query.to_lowercase())
+                        })
+                        .map(|node| (node.table_info.name.clone(), node.table_info.clone()))
+                        .collect();
+                    
+                    for (name, table_info) in nodes_info {
                         ui.horizontal(|ui| {
                             // Table name (clickable)
-                            let selected = self.selected_table.as_ref() == Some(name);
-                            if ui.selectable_label(selected, name).clicked() {
+                            let selected = self.selected_table.as_ref() == Some(&name);
+                            if ui.selectable_label(selected, &name).clicked() {
                                 self.selected_table = Some(name.clone());
                             }
                             
@@ -72,27 +74,27 @@ impl DataSourcesPanel {
                                     .fill(Color32::from_rgb(0, 150, 0))
                                     .small();
                                 if ui.add(button).on_hover_text("Add to canvas").clicked() {
-                                    // Find the source data node to get table info
-                                    if let Some(source_node) = state.data_nodes.iter().find(|n| &n.table_info.name == name) {
-                                        // Create a new instance of this data source on the canvas
-                                        let node_id = pika_core::types::NodeId(uuid::Uuid::new_v4());
-                                        
-                                        // Calculate position with offset to avoid stacking
-                                        let existing_count = state.canvas_nodes.values()
-                                            .filter(|n| matches!(&n.node_type, CanvasNodeType::Table { table_info } if &table_info.name == name))
-                                            .count();
-                                        let offset = (existing_count as f32) * 30.0;
-                                        
-                                        let canvas_node = crate::state::CanvasNode {
-                                            id: node_id,
-                                            position: egui::Vec2::new(200.0 + offset, 200.0 + offset),
-                                            size: egui::Vec2::new(200.0, 150.0),
-                                            node_type: crate::state::CanvasNodeType::Table { 
-                                                table_info: source_node.table_info.clone() 
-                                            },
-                                        };
-                                        state.canvas_nodes.insert(node_id, canvas_node);
-                                    }
+                                    // Create a new instance of this data source on the canvas
+                                    let node_id = pika_core::types::NodeId(uuid::Uuid::new_v4());
+                                    
+                                    // Calculate position with offset to avoid stacking
+                                    let existing_count = state.canvas_nodes.values()
+                                        .filter(|n| matches!(&n.node_type, CanvasNodeType::Table { table_info: t } if &t.name == &name))
+                                        .count();
+                                    let offset = (existing_count as f32) * 30.0;
+                                    
+                                    let canvas_node = crate::state::CanvasNode {
+                                        id: node_id,
+                                        position: egui::Vec2::new(200.0 + offset, 200.0 + offset),
+                                        size: egui::Vec2::new(200.0, 150.0),
+                                        node_type: crate::state::CanvasNodeType::Table { 
+                                            table_info: table_info.clone()
+                                        },
+                                    };
+                                    state.canvas_nodes.insert(node_id, canvas_node);
+                                    
+                                    // Load data preview for the new node
+                                    state.load_data_preview(node_id);
                                 }
                             });
                         });

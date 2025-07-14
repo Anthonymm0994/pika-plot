@@ -201,6 +201,51 @@ impl CanvasPanel {
                 }
             );
         }
+
+        // Handle keyboard input for query editing
+        if let Some(selected_id) = state.selected_node {
+            if let Some(node) = state.get_canvas_node(selected_id) {
+                if let CanvasNodeType::Table { .. } = &node.node_type {
+                    // Handle text input for query
+                    if response.has_focus() {
+                        ui.ctx().input(|i| {
+                            for event in &i.events {
+                                if let egui::Event::Text(text) = event {
+                                    if let Some(query) = state.node_queries.get_mut(&selected_id) {
+                                        query.push_str(text);
+                                    }
+                                }
+                                if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                                    if let Some(query) = state.node_queries.get_mut(&selected_id) {
+                                        match key {
+                                            egui::Key::Backspace => {
+                                                query.pop();
+                                            }
+                                            egui::Key::Enter => {
+                                                if modifiers.ctrl || modifiers.command {
+                                                    // Execute query on Ctrl+Enter
+                                                    state.execute_node_query(selected_id);
+                                                } else {
+                                                    query.push('\n');
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Draw the canvas
+        painter.rect_filled(
+            response.rect,
+            0.0,
+            Color32::from_rgb(20, 20, 20),
+        );
     }
     
     fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, _to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
@@ -361,8 +406,16 @@ impl CanvasPanel {
         if let Some(node) = state.get_canvas_node(node_id) {
             match &node.node_type {
                 CanvasNodeType::Table { .. } => {
-                    if ui.button("🔍 Query Data").clicked() {
-                        // TODO: Open query dialog
+                    ui.label("Query (Ctrl+Enter to execute):");
+                    if let Some(query) = state.node_queries.get_mut(&node_id) {
+                        ui.add(egui::TextEdit::multiline(query)
+                            .code_editor()
+                            .desired_width(250.0)
+                            .desired_rows(3));
+                    }
+                    
+                    if ui.button("▶ Execute Query").clicked() {
+                        state.execute_node_query(node_id);
                         self.context_menu_pos = None;
                         ui.close_menu();
                     }
@@ -484,84 +537,79 @@ impl CanvasPanel {
                     Color32::WHITE,
                 );
                 
-                // Query input area (if selected)
+                // Query input area
+                let query_rect = Rect::from_min_size(
+                    rect.min + Vec2::new(5.0, table_info.columns.len() as f32 * 14.0 * self.zoom + 55.0),
+                    Vec2::new(rect.width() - 10.0, 60.0),
+                );
+                
+                // Only show query area if node is selected
                 if selected {
-                    let query_rect = Rect::from_min_size(
-                        rect.min + Vec2::new(10.0, 30.0),
-                        Vec2::new(rect.width() - 20.0, 25.0)
-                    );
-                    
-                    // Draw query input background
-                    painter.rect_filled(
-                        query_rect,
-                        3.0,
-                        Color32::from_rgba_premultiplied(40, 40, 50, 200),
-                    );
+                    painter.rect_filled(query_rect, 2.0, Color32::from_rgb(35, 35, 50));
+                    painter.rect_stroke(query_rect, 2.0, Stroke::new(1.0, Color32::from_gray(80)));
                     
                     // Get query text for this node
                     let query_text = state.node_queries.get(&node.id)
                         .map(|s| s.as_str())
                         .unwrap_or("SELECT * FROM ... LIMIT 10");
                     
-                    // Draw query text
                     painter.text(
                         query_rect.min + Vec2::new(5.0, 5.0),
                         egui::Align2::LEFT_TOP,
+                        "Query:",
+                        FontId::proportional(10.0 * self.zoom),
+                        Color32::from_gray(150),
+                    );
+                    
+                    painter.text(
+                        query_rect.min + Vec2::new(5.0, 20.0),
+                        egui::Align2::LEFT_TOP,
                         query_text,
-                        FontId::proportional(12.0 * self.zoom),
+                        FontId::monospace(11.0 * self.zoom),
                         Color32::from_gray(200),
                     );
-                }
-                
-                // Mini data preview (show actual data if available)
-                let preview_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(10.0, if selected { 60.0 } else { 35.0 }),
-                    Vec2::new(rect.width() - 20.0, rect.height() - (if selected { 70.0 } else { 45.0 }))
-                );
-                
-                // Check if we have actual data for this node
-                if let Some(preview) = state.node_data.get(&node.id) {
-                    // Draw actual data preview
-                    let font_size = 10.0 * self.zoom;
-                    let line_height = 14.0 * self.zoom;
                     
-                    // Headers
-                    if let Some(headers) = &preview.headers {
-                        let header_text = headers.join(" | ");
-                        painter.text(
-                            preview_rect.min,
-                            egui::Align2::LEFT_TOP,
-                            header_text,
-                            FontId::proportional(font_size),
-                            Color32::from_rgb(120, 180, 120),
+                    // Show data preview if available
+                    if let Some(preview) = state.node_data.get(&node.id) {
+                        let data_rect = Rect::from_min_size(
+                            rect.min + Vec2::new(5.0, query_rect.bottom() - rect.min.y + 5.0),
+                            Vec2::new(rect.width() - 10.0, rect.bottom() - query_rect.bottom() - 10.0),
                         );
-                    }
-                    
-                    // Data rows
-                    if let Some(rows) = &preview.rows {
-                        for (i, row) in rows.iter().take(3).enumerate() {
-                            let y_offset = (i + 1) as f32 * line_height;
-                            let row_text = row.join(" | ");
-                            painter.text(
-                                preview_rect.min + Vec2::new(0.0, y_offset),
-                                egui::Align2::LEFT_TOP,
-                                row_text,
-                                FontId::proportional(font_size),
-                                Color32::from_gray(180),
-                            );
+                        
+                        painter.rect_filled(data_rect, 2.0, Color32::from_rgb(25, 25, 35));
+                        
+                        // Draw headers
+                        if let Some(headers) = &preview.headers {
+                            let header_y = data_rect.min.y + 5.0;
+                            let col_width = data_rect.width() / headers.len() as f32;
+                            
+                            for (i, header) in headers.iter().enumerate() {
+                                painter.text(
+                                    Pos2::new(data_rect.min.x + i as f32 * col_width + 5.0, header_y),
+                                    egui::Align2::LEFT_TOP,
+                                    header,
+                                                                            FontId::proportional(11.0 * self.zoom),
+                                    Color32::from_gray(220),
+                                );
+                            }
+                            
+                            // Draw rows
+                            if let Some(rows) = &preview.rows {
+                                for (row_idx, row) in rows.iter().take(3).enumerate() {
+                                    let row_y = header_y + (row_idx + 1) as f32 * 15.0 * self.zoom;
+                                    
+                                    for (col_idx, cell) in row.iter().enumerate() {
+                                        painter.text(
+                                            Pos2::new(data_rect.min.x + col_idx as f32 * col_width + 5.0, row_y),
+                                            egui::Align2::LEFT_TOP,
+                                            cell,
+                                            FontId::proportional(9.0 * self.zoom),
+                                            Color32::from_gray(180),
+                                        );
+                                    }
+                                }
+                            }
                         }
-                    }
-                } else {
-                    // Show placeholder for columns if no data yet
-                    let y_offset = 0.0;
-                    for (i, col) in table_info.columns.iter().take(4).enumerate() {
-                        painter.text(
-                            preview_rect.min + Vec2::new(0.0, y_offset + i as f32 * 14.0 * self.zoom),
-                            egui::Align2::LEFT_TOP,
-                            &col.name,
-                            FontId::proportional(10.0 * self.zoom),
-                            Color32::from_gray(150),
-                        );
                     }
                 }
             }
@@ -598,7 +646,7 @@ impl CanvasPanel {
                 painter.rect_filled(plot_rect, 2.0, Color32::from_rgb(40, 30, 30));
                 
                 // Check if connected to a data source
-                let has_data = false; // TODO: Check connections when state is available
+                let has_data = state.connections.iter().any(|conn| conn.to == node.id);
                 
                 if has_data {
                     // Draw placeholder visualization

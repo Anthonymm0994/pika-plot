@@ -134,8 +134,8 @@ impl AppState {
             view_mode: ViewMode::Canvas,
             tool_mode: ToolMode::Select,
             selected_node: None,
-            data_nodes: vec![],
-            connections: vec![],
+            data_nodes: Vec::new(),
+            connections: Vec::new(),
             query_results: HashMap::new(),
             theme: Theme::Dark,
             show_import_dialog: false,
@@ -149,15 +149,14 @@ impl AppState {
             node_data: HashMap::new(),
         }
     }
-
-    /// Update tables list from data nodes
+    
+    /// Update convenience tables list
     pub fn update_tables(&mut self) {
         self.tables = self.data_nodes.iter()
             .map(|node| node.table_info.clone())
             .collect();
     }
-
-    /// Add a new data node
+    
     pub fn add_data_node(&mut self, table: TableInfo) -> NodeId {
         let node_id = NodeId(uuid::Uuid::new_v4());
         let node = DataNode {
@@ -168,41 +167,104 @@ impl AppState {
         };
         self.data_nodes.push(node);
         
-        // Don't automatically add to canvas - let user decide when to add
-        // Canvas nodes will be created when user clicks the green + button
+        // Don't automatically add to canvas - let user do that
+        // This fixes the issue where first node always gets added
         
         self.update_tables();
         node_id
     }
-
-    /// Remove a data node
+    
+    /// Load data preview for a table node
+    pub fn load_data_preview(&mut self, node_id: NodeId) {
+        // Get table info first to avoid borrow issues
+        let table_info_opt = self.get_canvas_node(node_id)
+            .and_then(|node| match &node.node_type {
+                CanvasNodeType::Table { table_info } => Some(table_info.clone()),
+                _ => None,
+            });
+            
+        if let Some(table_info) = table_info_opt {
+            // Load sample data from the table
+            // For now, create mock data - in real implementation, this would load from the actual data source
+            let preview = NodeDataPreview {
+                headers: Some(table_info.columns.iter().map(|c| c.name.clone()).collect()),
+                rows: Some(vec![
+                    vec!["1".to_string(), "Sample Data".to_string(), "100".to_string()],
+                    vec!["2".to_string(), "More Data".to_string(), "200".to_string()],
+                    vec!["3".to_string(), "Another Row".to_string(), "300".to_string()],
+                ]),
+            };
+            self.node_data.insert(node_id, preview);
+            
+            // Initialize default query for this node
+            if !self.node_queries.contains_key(&node_id) {
+                self.node_queries.insert(node_id, format!("SELECT * FROM {} LIMIT 10", table_info.name));
+            }
+        }
+    }
+    
+    /// Execute query for a table node
+    pub fn execute_node_query(&mut self, node_id: NodeId) {
+        if let Some(query) = self.node_queries.get(&node_id).cloned() {
+            // For now, just update the preview with mock results
+            // In real implementation, this would execute the query via DuckDB
+            let preview = NodeDataPreview {
+                headers: Some(vec!["id".to_string(), "result".to_string(), "value".to_string()]),
+                rows: Some(vec![
+                    vec!["Q1".to_string(), format!("Query: {}", query), "42".to_string()],
+                    vec!["Q2".to_string(), "Result Row 2".to_string(), "84".to_string()],
+                ]),
+            };
+            self.node_data.insert(node_id, preview);
+            
+            // Update any connected plot nodes
+            self.update_connected_plots(node_id);
+        }
+    }
+    
+    /// Update plots connected to a data source
+    fn update_connected_plots(&mut self, source_node_id: NodeId) {
+        let connected_plots: Vec<NodeId> = self.connections.iter()
+            .filter(|conn| conn.from == source_node_id)
+            .map(|conn| conn.to)
+            .collect();
+            
+        for plot_id in connected_plots {
+            // Trigger plot update
+            // In real implementation, this would pass the data to the plot
+            if let Some(_plot_node) = self.get_canvas_node_mut(plot_id) {
+                // Mark plot as having data
+                // The plot will read from the source node's data
+            }
+        }
+    }
+    
     pub fn remove_data_node(&mut self, id: NodeId) {
-        self.data_nodes.retain(|n| n.id != id);
-        self.connections.retain(|c| c.from != id && c.to != id);
-        self.query_results.remove(&id);
-        self.plot_configs.remove(&id);
-        self.canvas_nodes.remove(&id);
+        self.data_nodes.retain(|node| node.id != id);
         self.update_tables();
     }
-
+    
     pub fn get_data_node(&self, id: NodeId) -> Option<&DataNode> {
-        self.data_nodes.iter().find(|n| n.id == id)
+        self.data_nodes.iter().find(|node| node.id == id)
     }
-
+    
     pub fn add_connection(&mut self, from: NodeId, to: NodeId, connection_type: ConnectionType) {
         let connection = NodeConnection {
-            id: format!("{}-{}", from.0, to.0),
+            id: uuid::Uuid::new_v4().to_string(),
             from,
             to,
             connection_type,
         };
         self.connections.push(connection);
+        
+        // When connecting to a plot, update it with data
+        self.update_connected_plots(from);
     }
-
+    
     pub fn get_canvas_node(&self, id: NodeId) -> Option<&CanvasNode> {
         self.canvas_nodes.get(&id)
     }
-
+    
     pub fn get_canvas_node_mut(&mut self, id: NodeId) -> Option<&mut CanvasNode> {
         self.canvas_nodes.get_mut(&id)
     }

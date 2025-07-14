@@ -454,6 +454,7 @@ impl FileConfigScreen {
     fn render_column_table(&mut self, ui: &mut Ui, file_idx: usize) {
         if let Some(file) = self.files.get_mut(file_idx) {
             let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+            
             let table = TableBuilder::new(ui)
                 .striped(true)
                 .resizable(false)

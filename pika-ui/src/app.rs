@@ -498,6 +498,9 @@ impl eframe::App for App {
         // Handle keyboard shortcuts
         self.handle_shortcuts(ctx);
         
+        // Store previous view mode to detect changes
+        let prev_view_mode = self.state.view_mode.clone();
+        
         // Check view mode
         match self.state.view_mode {
             crate::state::ViewMode::FileConfig => {
@@ -551,6 +554,11 @@ impl eframe::App for App {
                     self.canvas_panel.show(ui, &mut self.state, &self.app_event_tx);
                 });
             }
+        }
+        
+        // If view mode changed, request a repaint to ensure proper cleanup
+        if prev_view_mode != self.state.view_mode {
+            ctx.request_repaint();
         }
     }
 } 
