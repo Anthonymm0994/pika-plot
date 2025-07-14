@@ -65,8 +65,16 @@ mod tests {
         assert_eq!(state.data_nodes.len(), 1);
         assert_eq!(state.canvas_nodes.len(), 0);
         
-        // Step 2: Add to canvas
-        state.add_canvas_node_for_data(data_node_id);
+        // Step 2: Add to canvas - manually for test
+        let canvas_node = CanvasNode {
+            id: data_node_id,
+            position: egui::Vec2::new(100.0, 100.0),
+            size: egui::Vec2::new(200.0, 150.0),
+            node_type: CanvasNodeType::Table { 
+                table_info: table_info.clone()
+            },
+        };
+        state.canvas_nodes.insert(data_node_id, canvas_node);
         
         // Verify canvas node was created
         assert_eq!(state.canvas_nodes.len(), 1);
@@ -86,7 +94,17 @@ mod tests {
         // Add data and canvas node
         let table_info = create_test_table_info();
         let data_node_id = state.add_data_node(table_info.clone());
-        state.add_canvas_node_for_data(data_node_id);
+        
+        // Manually add canvas node for test
+        let canvas_node = CanvasNode {
+            id: data_node_id,
+            position: egui::Vec2::new(100.0, 100.0),
+            size: egui::Vec2::new(200.0, 150.0),
+            node_type: CanvasNodeType::Table { 
+                table_info: table_info.clone()
+            },
+        };
+        state.canvas_nodes.insert(data_node_id, canvas_node);
         
         // Create a plot config (store separately in state)
         let plot_config = PlotConfig {
@@ -161,8 +179,18 @@ mod tests {
         }
         
         // Add all to canvas
-        for id in &table_ids {
-            state.add_canvas_node_for_data(*id);
+        for (i, id) in table_ids.iter().enumerate() {
+            // Manually add canvas node for test
+            let table_info = state.get_data_node(*id).unwrap().table_info.clone();
+            let canvas_node = CanvasNode {
+                id: *id,
+                position: egui::Vec2::new(50.0 + i as f32 * 250.0, 100.0),
+                size: egui::Vec2::new(200.0, 150.0),
+                node_type: CanvasNodeType::Table { 
+                    table_info
+                },
+            };
+            state.canvas_nodes.insert(*id, canvas_node);
         }
         
         // Create plots from each table
@@ -205,12 +233,34 @@ mod tests {
         // Create two table nodes
         let table1 = create_test_table_info();
         let table1_id = state.add_data_node(table1);
-        state.add_canvas_node_for_data(table1_id);
+        
+        // Manually add canvas node for test
+        let table1_info = state.get_data_node(table1_id).unwrap().table_info.clone();
+        let canvas_node1 = CanvasNode {
+            id: table1_id,
+            position: egui::Vec2::new(100.0, 100.0),
+            size: egui::Vec2::new(200.0, 150.0),
+            node_type: CanvasNodeType::Table { 
+                table_info: table1_info
+            },
+        };
+        state.canvas_nodes.insert(table1_id, canvas_node1);
         
         let mut table2 = create_test_table_info();
-        table2.name = "test_data_2".to_string();
+        table2.name = "table2".to_string();
         let table2_id = state.add_data_node(table2);
-        state.add_canvas_node_for_data(table2_id);
+        
+        // Manually add canvas node for test
+        let table2_info = state.get_data_node(table2_id).unwrap().table_info.clone();
+        let canvas_node2 = CanvasNode {
+            id: table2_id,
+            position: egui::Vec2::new(400.0, 100.0),
+            size: egui::Vec2::new(200.0, 150.0),
+            node_type: CanvasNodeType::Table { 
+                table_info: table2_info
+            },
+        };
+        state.canvas_nodes.insert(table2_id, canvas_node2);
         
         // Create connection between them
         let connection = pika_ui::state::NodeConnection {

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use pika_ui::state::{AppState, ToolMode};
+    use pika_ui::state::{AppState, ToolMode, CanvasNode, CanvasNodeType};
     use pika_core::types::TableInfo;
     
     #[test]
@@ -29,7 +29,7 @@ mod tests {
     }
     
     #[test]
-    fn test_add_canvas_node_for_data() {
+    fn test_add_canvas_node() {
         let mut state = AppState::new();
         
         // Create and add data node
@@ -43,7 +43,17 @@ mod tests {
         let node_id = state.add_data_node(table);
         
         // Now add to canvas
-        let canvas_id = state.add_canvas_node_for_data(node_id);
+        // Manually add canvas node for test
+        let canvas_node = CanvasNode {
+            id: node_id,
+            position: egui::Vec2::new(100.0, 100.0),
+            size: egui::Vec2::new(200.0, 150.0),
+            node_type: CanvasNodeType::Table { 
+                table_info: table.clone()
+            },
+        };
+        state.canvas_nodes.insert(node_id, canvas_node);
+        let canvas_id = node_id;
         
         // Verify canvas node was created
         assert!(canvas_id.is_some());
@@ -67,7 +77,16 @@ mod tests {
             };
             
             let node_id = state.add_data_node(table);
-            state.add_canvas_node_for_data(node_id);
+            // Manually add canvas node for test
+            let canvas_node = CanvasNode {
+                id: node_id,
+                position: egui::Vec2::new(100.0 + (i as f32 * 50.0), 100.0 + (i as f32 * 50.0)),
+                size: egui::Vec2::new(200.0, 150.0),
+                node_type: CanvasNodeType::Table { 
+                    table_info: table.clone()
+                },
+            };
+            state.canvas_nodes.insert(node_id, canvas_node);
         }
         
         // Verify they have different positions

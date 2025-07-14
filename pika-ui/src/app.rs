@@ -4,6 +4,7 @@ use eframe::egui;
 use pika_core::{
     events::EventBus,
     nodes::{Node, NodeType},
+    types::NodeId,
 };
 
 use crate::{
@@ -118,6 +119,57 @@ impl CanvasToolbar {
             }
             if ui.button("Reset").clicked() {
                 state.canvas_state.zoom = 1.0;
+            }
+            
+            ui.separator();
+            
+            // Grid toggle
+            ui.checkbox(&mut state.canvas_state.show_grid, "Show Grid");
+            
+            ui.separator();
+            
+            // Debug: Add sample data button
+            if ui.button("Add Sample Data").clicked() {
+                // Create a sample table info
+                let table_info = pika_core::types::TableInfo {
+                    name: "Sample Data".to_string(),
+                    columns: vec![
+                        pika_core::types::ColumnInfo {
+                            name: "id".to_string(),
+                            data_type: "integer".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "name".to_string(),
+                            data_type: "text".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "value".to_string(),
+                            data_type: "real".to_string(),
+                            nullable: true,
+                        },
+                    ],
+                    row_count: Some(10),
+                    source_path: None,
+                    preview_data: None,
+                };
+                
+                // Add to data nodes
+                state.add_data_node(table_info.clone());
+                
+                // Also add to canvas to show immediately
+                let node_id = NodeId::new();
+                let canvas_node = crate::state::CanvasNode {
+                    id: node_id,
+                    position: egui::Vec2::new(100.0, 100.0),
+                    size: egui::Vec2::new(200.0, 150.0),
+                    node_type: crate::state::CanvasNodeType::Table { 
+                        table_info: table_info.clone()
+                    },
+                };
+                state.canvas_nodes.insert(node_id, canvas_node);
+                state.load_data_preview(node_id);
             }
         });
     }

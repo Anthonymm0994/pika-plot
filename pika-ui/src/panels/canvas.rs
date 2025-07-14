@@ -48,6 +48,13 @@ impl CanvasPanel {
             Sense::click_and_drag(),
         );
         
+        // Draw the canvas background FIRST
+        painter.rect_filled(
+            response.rect,
+            0.0,
+            Color32::from_rgb(20, 20, 20),
+        );
+        
         // Update our internal state from the app state
         self.zoom = state.canvas_state.zoom;
         self.pan_offset = state.canvas_state.pan_offset;
@@ -239,13 +246,6 @@ impl CanvasPanel {
                 }
             }
         }
-
-        // Draw the canvas
-        painter.rect_filled(
-            response.rect,
-            0.0,
-            Color32::from_rgb(20, 20, 20),
-        );
     }
     
     fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, _to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
@@ -424,6 +424,7 @@ impl CanvasPanel {
                     ui.label("Create Plot:");
                     ui.separator();
                     
+                    // Basic plots
                     if ui.button("📊 Histogram").clicked() {
                         self.create_plot_from_table(state, node_id, "Histogram");
                         self.context_menu_pos = None;
@@ -444,13 +445,41 @@ impl CanvasPanel {
                         self.context_menu_pos = None;
                         ui.close_menu();
                     }
-                    if ui.button("🥧 Pie Chart").clicked() {
-                        self.create_plot_from_table(state, node_id, "Pie");
+                    
+                    ui.separator();
+                    
+                    // Statistical plots
+                    if ui.button("📦 Box Plot").clicked() {
+                        self.create_plot_from_table(state, node_id, "BoxPlot");
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    if ui.button("🎻 Violin Plot").clicked() {
+                        self.create_plot_from_table(state, node_id, "Violin");
                         self.context_menu_pos = None;
                         ui.close_menu();
                     }
                     if ui.button("🔥 Heatmap").clicked() {
                         self.create_plot_from_table(state, node_id, "Heatmap");
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    if ui.button("🔗 Correlation").clicked() {
+                        self.create_plot_from_table(state, node_id, "Correlation");
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    
+                    ui.separator();
+                    
+                    // Advanced plots
+                    if ui.button("⏱ Time Series").clicked() {
+                        self.create_plot_from_table(state, node_id, "TimeSeries");
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                    if ui.button("🕸 Radar Chart").clicked() {
+                        self.create_plot_from_table(state, node_id, "Radar");
                         self.context_menu_pos = None;
                         ui.close_menu();
                     }
@@ -482,6 +511,63 @@ impl CanvasPanel {
             state.canvas_nodes.insert(id, canvas_node);
             self.context_menu_pos = None;
             ui.close_menu();
+        }
+        
+        ui.separator();
+        
+        ui.menu_button("Add Shape", |ui| {
+            if ui.button("Rectangle").clicked() {
+                let id = NodeId::new();
+                let canvas_node = CanvasNode {
+                    id,
+                    position: pos.to_vec2(),
+                    size: Vec2::new(100.0, 60.0),
+                    node_type: CanvasNodeType::Shape { shape_type: ShapeType::Rectangle },
+                };
+                state.canvas_nodes.insert(id, canvas_node);
+                self.context_menu_pos = None;
+                ui.close_menu();
+            }
+            if ui.button("Circle").clicked() {
+                let id = NodeId::new();
+                let canvas_node = CanvasNode {
+                    id,
+                    position: pos.to_vec2(),
+                    size: Vec2::new(80.0, 80.0),
+                    node_type: CanvasNodeType::Shape { shape_type: ShapeType::Circle },
+                };
+                state.canvas_nodes.insert(id, canvas_node);
+                self.context_menu_pos = None;
+                ui.close_menu();
+            }
+        });
+        
+        if !state.data_nodes.is_empty() {
+            ui.separator();
+            ui.menu_button("Add Data Source", |ui| {
+                // Collect data nodes info to avoid borrow checker issues
+                let data_nodes_info: Vec<_> = state.data_nodes.iter()
+                    .map(|node| node.table_info.clone())
+                    .collect();
+                
+                for table_info in data_nodes_info {
+                    if ui.button(&table_info.name).clicked() {
+                        let node_id = NodeId::new();
+                        let canvas_node = CanvasNode {
+                            id: node_id,
+                            position: pos.to_vec2(),
+                            size: Vec2::new(200.0, 150.0),
+                            node_type: CanvasNodeType::Table { 
+                                table_info: table_info.clone()
+                            },
+                        };
+                        state.canvas_nodes.insert(node_id, canvas_node);
+                        state.load_data_preview(node_id);
+                        self.context_menu_pos = None;
+                        ui.close_menu();
+                    }
+                }
+            });
         }
     }
     
