@@ -213,9 +213,10 @@ impl MenuBar {
                 if ui.checkbox(&mut state.canvas_state.show_grid, "Toggle Grid").clicked() {
                     ui.close_menu();
                 }
-                if ui.checkbox(&mut state.canvas_state.snap_to_grid, "Snap to Grid").clicked() {
-                    ui.close_menu();
-                }
+                // TODO: Add snap_to_grid field to CanvasState
+                // if ui.checkbox(&mut state.canvas_state.snap_to_grid, "Snap to Grid").clicked() {
+                //     ui.close_menu();
+                // }
                 ui.separator();
                 ui.label("Mode:");
                 if ui.radio_value(&mut state.view_mode, crate::state::ViewMode::Canvas, "Canvas Mode").clicked() {
