@@ -67,7 +67,7 @@ impl QueryCache {
             self.update_access_order(key);
             Some(entry.result.clone())
         } else {
-            None
+        None
         }
     }
     

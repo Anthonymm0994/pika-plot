@@ -94,7 +94,7 @@ impl EngineError {
 }
 
 /// Convenient Result type alias
-pub type Result<T> = std::result::Result<T, EngineError>;
+pub type Result<T> = std::result::Result<T, EngineError>; 
 
 /// Extension trait for adding context to Results
 pub trait ResultExt<T> {

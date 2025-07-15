@@ -199,8 +199,8 @@ impl EnhancedCsvImporter {
         // Check boolean
         if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
             return DataType::Boolean;
-        }
-        
+            }
+            
         // Check UUID
         if UUID_PATTERN.is_match(value) {
             return DataType::Uuid;
@@ -211,12 +211,12 @@ impl EnhancedCsvImporter {
             if pattern.is_match(value) {
                 return if value.contains('T') || value.contains(':') {
                     DataType::DateTime
-                } else {
+        } else {
                     DataType::Date
                 };
             }
-        }
-        
+            }
+            
         // Check numeric types
         if let Ok(_) = value.parse::<i64>() {
             return DataType::Integer;
@@ -347,8 +347,8 @@ mod tests {
         assert_eq!(importer.detect_value_type(""), DataType::Text);
         assert_eq!(importer.detect_value_type("null"), DataType::Text);
         assert_eq!(importer.detect_value_type("NULL"), DataType::Text);
-    }
-    
+        }
+        
     #[test]
     fn test_detect_value_type_boolean() {
         let importer = EnhancedCsvImporter::new();
@@ -367,7 +367,7 @@ mod tests {
         );
         assert_eq!(
             importer.detect_value_type("not-a-uuid"),
-            DataType::Text
+        DataType::Text
         );
     }
     
