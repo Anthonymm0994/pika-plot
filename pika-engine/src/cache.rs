@@ -1,98 +1,122 @@
-//! Query caching module.
+//! Query caching module with LRU eviction policy.
+//!
+//! This module provides a simple Least Recently Used (LRU) cache
+//! for storing query results to improve performance.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
-use pika_core::{
-    types::QueryResult,
-};
+use pika_core::types::QueryResult;
 
-/// Query cache for storing results
+/// Maximum default cache capacity
+const DEFAULT_MAX_ENTRIES: usize = 1000;
+
+/// Cache key type for better type safety
+pub type CacheKey = String;
+
+/// Simple LRU query cache for storing results
+/// 
+/// Note: This implementation is not thread-safe. If concurrent access
+/// is needed, wrap in a Mutex or RwLock.
+/// 
+/// FIXME: Consider making this thread-safe by default using parking_lot::RwLock
+/// to avoid forcing users to handle synchronization.
+#[derive(Debug)]
 pub struct QueryCache {
-    entries: HashMap<String, CacheEntry>,
+    /// Map from cache key to cache entry
+    entries: HashMap<CacheKey, CacheEntry>,
+    /// Queue to track access order (most recent at back)
+    access_order: VecDeque<CacheKey>,
+    /// Maximum number of entries to store
     max_entries: usize,
-    /// Track query hash to cache key mapping for deduplication
-    query_hash_map: HashMap<u64, String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CacheEntry {
     result: Arc<QueryResult>,
     query: String,
-    query_hash: u64,
-    access_count: u32,
 }
 
 impl QueryCache {
     /// Create a new query cache with specified capacity
+    /// 
+    /// # Panics
+    /// Panics if capacity is 0
     pub fn new(capacity: usize) -> Self {
+        assert!(capacity > 0, "Cache capacity must be greater than 0");
+        
         Self {
-            entries: HashMap::new(),
+            entries: HashMap::with_capacity(capacity),
+            access_order: VecDeque::with_capacity(capacity),
             max_entries: capacity,
-            query_hash_map: HashMap::new(),
         }
     }
     
-    /// Create a new query cache with memory limit (for backward compatibility)
-    pub fn new_with_limit(_memory_limit: u64) -> Self {
-        // For now, ignore memory limit and use default capacity
-        Self::new(100)
+    /// Create a new query cache with default capacity
+    pub fn with_default_capacity() -> Self {
+        Self::new(DEFAULT_MAX_ENTRIES)
     }
     
     /// Get a cached result if it exists
-    pub fn get(&self, key: &str) -> Option<Arc<QueryResult>> {
-        self.entries.get(key).map(|entry| entry.result.clone())
-    }
-    
-    /// Get cached result by query (deduplication support)
-    pub fn get_by_query(&mut self, query: &str) -> Option<Arc<QueryResult>> {
-        let query_hash = Self::hash_query(query);
-        
-        if let Some(cache_key) = self.query_hash_map.get(&query_hash) {
-            if let Some(entry) = self.entries.get_mut(cache_key) {
-                entry.access_count += 1;
-                return Some(entry.result.clone());
-            }
+    /// 
+    /// This marks the entry as recently used, moving it to the end
+    /// of the LRU queue.
+    pub fn get(&mut self, key: &str) -> Option<Arc<QueryResult>> {
+        if let Some(entry) = self.entries.get(key) {
+            // Update access order - remove and re-add at the back
+            self.update_access_order(key);
+            Some(entry.result.clone())
+        } else {
+            None
         }
-        None
     }
     
     /// Insert a new result into the cache
-    pub fn insert(&mut self, query: String, result: QueryResult) -> String {
-        let query_hash = Self::hash_query(&query);
+    /// 
+    /// Returns the generated cache key for the entry.
+    /// If the cache is at capacity, the least recently used entry is evicted.
+    pub fn insert(&mut self, query: String, result: QueryResult) -> CacheKey {
+        let key = Self::generate_cache_key();
         
-        // Check if we already have this query cached (deduplication)
-        if let Some(existing_key) = self.query_hash_map.get(&query_hash) {
-            return existing_key.clone();
-        }
-        
-        let key = format!("query_{}", Uuid::new_v4());
-        
-        // Smart eviction: remove least recently accessed if at capacity
+        // Check if we need to evict
         if self.entries.len() >= self.max_entries {
-            self.evict_least_accessed();
+            self.evict_lru();
         }
         
-        self.query_hash_map.insert(query_hash, key.clone());
+        debug_assert!(self.entries.len() < self.max_entries);
+        
+        // Insert the new entry
         self.entries.insert(key.clone(), CacheEntry {
             result: Arc::new(result),
             query,
-            query_hash,
-            access_count: 1,
         });
         
+        // Add to access order
+        self.access_order.push_back(key.clone());
+        
         key
+    }
+    
+    /// Remove a specific entry from the cache
+    pub fn remove(&mut self, key: &str) -> Option<Arc<QueryResult>> {
+        if let Some(entry) = self.entries.remove(key) {
+            // Remove from access order
+            self.access_order.retain(|k| k != key);
+            Some(entry.result)
+        } else {
+            None
+        }
     }
     
     /// Clear all cached entries
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.query_hash_map.clear();
+        self.access_order.clear();
     }
     
     /// Get the number of cached entries
     pub fn len(&self) -> usize {
+        debug_assert_eq!(self.entries.len(), self.access_order.len());
         self.entries.len()
     }
     
@@ -101,135 +125,182 @@ impl QueryCache {
         self.entries.is_empty()
     }
     
-    /// Invalidate cache entries that might be affected by table changes
-    pub fn invalidate_table(&mut self, table_name: &str) {
-        let mut keys_to_remove = Vec::new();
-        
-        for (key, entry) in &self.entries {
-            // Simple check: if query mentions the table, invalidate it
-            if entry.query.to_lowercase().contains(&table_name.to_lowercase()) {
-                keys_to_remove.push(key.clone());
-            }
-        }
-        
-        for key in keys_to_remove {
-            if let Some(entry) = self.entries.remove(&key) {
-                self.query_hash_map.remove(&entry.query_hash);
-            }
-        }
-    }
-    
-    /// Hash a query string for deduplication
-    fn hash_query(query: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
-        use std::collections::hash_map::DefaultHasher;
-        
-        let mut hasher = DefaultHasher::new();
-        // Normalize query by trimming and lowercasing
-        query.trim().to_lowercase().hash(&mut hasher);
-        hasher.finish()
-    }
-    
-    /// Evict the least recently accessed entry
-    fn evict_least_accessed(&mut self) {
-        if let Some((key, _)) = self.entries.iter()
-            .min_by_key(|(_, entry)| entry.access_count)
-            .map(|(k, e)| (k.clone(), e.query_hash)) {
-            
-            if let Some(entry) = self.entries.remove(&key) {
-                self.query_hash_map.remove(&entry.query_hash);
-            }
-        }
+    /// Get the maximum capacity of the cache
+    pub fn capacity(&self) -> usize {
+        self.max_entries
     }
     
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
-        let total_hits: u32 = self.entries.values()
-            .map(|e| e.access_count)
-            .sum();
-        
         CacheStats {
-            total_entries: self.entries.len(),
-            total_hits,
+            entries: self.len(),
             capacity: self.max_entries,
+            hit_rate: 0.0, // TODO: Track hits and misses
         }
+    }
+    
+    /// Update the access order for a key
+    fn update_access_order(&mut self, key: &str) {
+        // Remove from current position
+        self.access_order.retain(|k| k != key);
+        // Add to the back (most recently used)
+        self.access_order.push_back(key.to_string());
+    }
+    
+    /// Evict the least recently used entry
+    fn evict_lru(&mut self) {
+        if let Some(lru_key) = self.access_order.pop_front() {
+            self.entries.remove(&lru_key);
+        }
+    }
+    
+    /// Generate a unique cache key
+    fn generate_cache_key() -> CacheKey {
+        format!("query_{}", Uuid::new_v4())
     }
 }
 
+/// Cache statistics
 #[derive(Debug, Clone)]
 pub struct CacheStats {
-    pub total_entries: usize,
-    pub total_hits: u32,
+    pub entries: usize,
     pub capacity: usize,
+    pub hit_rate: f64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     
-    #[test]
-    fn test_cache_operations() {
-        let mut cache = QueryCache::new(2);
-        
-        let result = QueryResult {
-            columns: vec!["test".to_string()],
-            row_count: 1,
+    fn create_test_result(columns: Vec<&str>, row_count: usize) -> QueryResult {
+        QueryResult {
+            columns: columns.into_iter().map(|s| s.to_string()).collect(),
+            row_count,
             execution_time_ms: 10,
             memory_used_bytes: None,
-        };
+        }
+    }
+    
+    #[test]
+    fn test_cache_basic_operations() {
+        let mut cache = QueryCache::new(2);
         
+        let result = create_test_result(vec!["test"], 1);
         let key = cache.insert("SELECT * FROM test".to_string(), result.clone());
+        
         assert_eq!(cache.len(), 1);
+        assert!(!cache.is_empty());
         
         let cached = cache.get(&key).unwrap();
         assert_eq!(cached.row_count, 1);
+        assert_eq!(cached.columns, vec!["test"]);
     }
     
     #[test]
-    fn test_query_deduplication() {
-        let mut cache = QueryCache::new(10);
+    fn test_cache_lru_eviction() {
+        let mut cache = QueryCache::new(3);
         
-        let result = QueryResult {
-            columns: vec!["id".to_string(), "name".to_string()],
-            row_count: 5,
-            execution_time_ms: 20,
-            memory_used_bytes: Some(1024),
-        };
-        
-        // Insert same query twice
-        let key1 = cache.insert("SELECT * FROM users".to_string(), result.clone());
-        let key2 = cache.insert("SELECT * FROM users".to_string(), result.clone());
-        
-        // Should return the same key (deduplication)
-        assert_eq!(key1, key2);
-        assert_eq!(cache.len(), 1);
-        
-        // Test case insensitive deduplication
-        let key3 = cache.insert("select * from users".to_string(), result.clone());
-        assert_eq!(key1, key3);
-    }
-    
-    #[test]
-    fn test_cache_invalidation() {
-        let mut cache = QueryCache::new(10);
-        
-        let result = QueryResult {
-            columns: vec!["col1".to_string()],
-            row_count: 10,
-            execution_time_ms: 5,
-            memory_used_bytes: None,
-        };
-        
-        cache.insert("SELECT * FROM users".to_string(), result.clone());
-        cache.insert("SELECT * FROM posts".to_string(), result.clone());
-        cache.insert("SELECT * FROM users JOIN posts".to_string(), result.clone());
+        // Insert 3 items
+        let key1 = cache.insert("query1".to_string(), create_test_result(vec!["col1"], 1));
+        let key2 = cache.insert("query2".to_string(), create_test_result(vec!["col2"], 2));
+        let key3 = cache.insert("query3".to_string(), create_test_result(vec!["col3"], 3));
         
         assert_eq!(cache.len(), 3);
         
-        // Invalidate entries related to 'users' table
-        cache.invalidate_table("users");
+        // Access key1 to make it recently used
+        assert!(cache.get(&key1).is_some());
         
-        // Should only have the posts query left
+        // Insert a 4th item - should evict key2 (least recently used)
+        let key4 = cache.insert("query4".to_string(), create_test_result(vec!["col4"], 4));
+        
+        assert_eq!(cache.len(), 3);
+        assert!(cache.get(&key1).is_some()); // Should still exist
+        assert!(cache.get(&key2).is_none()); // Should be evicted
+        assert!(cache.get(&key3).is_some()); // Should still exist
+        assert!(cache.get(&key4).is_some()); // Should exist
+    }
+    
+    #[test]
+    fn test_cache_remove() {
+        let mut cache = QueryCache::new(5);
+        
+        let key1 = cache.insert("query1".to_string(), create_test_result(vec!["col1"], 1));
+        let key2 = cache.insert("query2".to_string(), create_test_result(vec!["col2"], 2));
+        
+        assert_eq!(cache.len(), 2);
+        
+        let removed = cache.remove(&key1);
+        assert!(removed.is_some());
         assert_eq!(cache.len(), 1);
+        assert!(cache.get(&key1).is_none());
+        assert!(cache.get(&key2).is_some());
+    }
+    
+    #[test]
+    fn test_cache_clear() {
+        let mut cache = QueryCache::new(10);
+        
+        cache.insert("query1".to_string(), create_test_result(vec!["col1"], 1));
+        cache.insert("query2".to_string(), create_test_result(vec!["col2"], 2));
+        cache.insert("query3".to_string(), create_test_result(vec!["col3"], 3));
+        
+        assert_eq!(cache.len(), 3);
+        
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+    }
+    
+    #[test]
+    fn test_cache_capacity() {
+        let cache = QueryCache::new(100);
+        assert_eq!(cache.capacity(), 100);
+        
+        let default_cache = QueryCache::with_default_capacity();
+        assert_eq!(default_cache.capacity(), DEFAULT_MAX_ENTRIES);
+    }
+    
+    #[test]
+    #[should_panic(expected = "Cache capacity must be greater than 0")]
+    fn test_cache_zero_capacity() {
+        QueryCache::new(0);
+    }
+    
+    #[test]
+    fn test_cache_stats() {
+        let mut cache = QueryCache::new(10);
+        
+        cache.insert("query1".to_string(), create_test_result(vec!["col1"], 1));
+        cache.insert("query2".to_string(), create_test_result(vec!["col2"], 2));
+        
+        let stats = cache.stats();
+        assert_eq!(stats.entries, 2);
+        assert_eq!(stats.capacity, 10);
+    }
+    
+    #[test]
+    fn test_cache_access_order_updates() {
+        let mut cache = QueryCache::new(3);
+        
+        // Insert items in order: 1, 2, 3
+        let key1 = cache.insert("query1".to_string(), create_test_result(vec!["col1"], 1));
+        let key2 = cache.insert("query2".to_string(), create_test_result(vec!["col2"], 2));
+        let key3 = cache.insert("query3".to_string(), create_test_result(vec!["col3"], 3));
+        
+        // At this point, LRU order is: 1, 2, 3 (1 is least recently used)
+        
+        // Access key1 to make it most recently used
+        assert!(cache.get(&key1).is_some());
+        
+        // Now LRU order is: 2, 3, 1 (2 is least recently used)
+        
+        // Insert a 4th item - should evict key2 (least recently used)
+        let key4 = cache.insert("query4".to_string(), create_test_result(vec!["col4"], 4));
+        
+        assert_eq!(cache.len(), 3);
+        assert!(cache.get(&key1).is_some()); // Should still exist (recently accessed)
+        assert!(cache.get(&key2).is_none()); // Should be evicted (least recently used)
+        assert!(cache.get(&key3).is_some()); // Should still exist
+        assert!(cache.get(&key4).is_some()); // Should exist (just inserted)
     }
 } 
