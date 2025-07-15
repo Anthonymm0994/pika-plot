@@ -45,5 +45,11 @@ serde_json = { workspace = true }
 # Plotting
 plotters = { workspace = true }
 
+# Random number generation for test data
+rand = "0.8"
+
 # Basic CSV processing instead of duckdb for now
 csv = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.0"

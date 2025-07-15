@@ -12,6 +12,8 @@ use tokio::sync::Mutex;
 use pika_core::error::PikaError;
 // Remove pika_ui import for now - we'll handle export differently
 
+mod comprehensive_plot_export_test;
+
 // Simple progress module
 mod progress {
     pub struct Spinner {
@@ -120,6 +122,13 @@ pub enum Commands {
     
     /// Show database schema
     Schema,
+    
+    /// Test plot export functionality by generating sample plots
+    TestPlotExports {
+        /// Directory to output test plots
+        #[arg(long, default_value = "./plot_export_tests")]
+        output_dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -227,6 +236,25 @@ async fn main() -> Result<()> {
         Commands::Schema => {
             println!("Schema functionality not yet implemented");
             // Note: get_schema method doesn't exist yet in Engine
+        }
+        
+        Commands::TestPlotExports { output_dir } => {
+            println!("🎨 Generating comprehensive plot export tests...");
+            println!("📁 Output directory: {}", output_dir.display());
+            
+            // Create the output directory if it doesn't exist
+            std::fs::create_dir_all(&output_dir)
+                .map_err(|e| PikaError::Io(e))?;
+            
+            // Generate all test plots
+            comprehensive_plot_export_test::generate_all_test_plots(&output_dir)
+                .map_err(|e| PikaError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string()
+                )))?;
+            
+            println!("\n✅ Test plots generated successfully!");
+            println!("🌐 Open {}/index.html in your browser to view all plots", output_dir.display());
         }
     }
     

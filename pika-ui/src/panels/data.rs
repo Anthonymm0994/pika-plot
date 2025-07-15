@@ -1,6 +1,6 @@
 //! Data panel showing loaded data nodes.
 
-use crate::state::{AppState, DataNode, CanvasNode, CanvasNodeType};
+use crate::state::{AppState, DataNode, CanvasNode, CanvasNodeType, QueryWindow};
 use crate::panels::canvas_panel::AppEvent;
 use tokio::sync::broadcast::Sender;
 use egui::{Ui, ScrollArea};
@@ -69,6 +69,17 @@ impl DataPanel {
                         
                         if response.clicked() {
                             state.selected_node = Some(node.id);
+                            // Open query window for this table (like Pebble)
+                            state.query_windows.insert(node.id, QueryWindow {
+                                id: node.id,
+                                title: node.table_info.name.clone(),
+                                query: format!("SELECT * FROM '{}'", node.table_info.name),
+                                result: None,
+                                error: None,
+                                page: 0,
+                                page_size: 25,
+                                is_open: true,
+                            });
                         }
                         
                         // Double-click to add to canvas

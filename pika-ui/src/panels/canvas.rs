@@ -2,10 +2,10 @@
 
 use crate::{
     panels::canvas_panel::AppEvent,
-    state::{AppState, CanvasNode, CanvasNodeType, ShapeType, ToolMode, ConnectionType},
+    state::{AppState, CanvasNode, CanvasNodeType, ToolMode, ConnectionType},
 };
 
-use egui::{Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, Shape, Area};
+use egui::{Ui, Painter, Pos2, Vec2, Color32, Stroke, Rect, Response, Sense, FontId, Shape, Area, vec2};
 
 use std::collections::{HashMap, HashSet};
 use pika_core::NodeId;
@@ -20,8 +20,14 @@ const GRID_SIZE: f32 = 20.0;
 const VISIBLE_MARGIN: f32 = 100.0;
 const CELL_SIZE: f32 = 100.0;
 const DEFAULT_PLOT_SIZE: Vec2 = Vec2::new(450.0, 350.0);
-const DEFAULT_TABLE_SIZE: Vec2 = Vec2::new(600.0, 400.0);
+const DEFAULT_TABLE_SIZE: Vec2 = Vec2::new(400.0, 250.0);  // Larger to show data preview
 const DEFAULT_SHAPE_SIZE: Vec2 = Vec2::new(150.0, 100.0);
+
+// Smooth animation constants
+const PAN_MOMENTUM_DECAY: f32 = 0.92;
+const PAN_MOMENTUM_THRESHOLD: f32 = 0.5;
+const ZOOM_SMOOTHING: f32 = 0.15;
+const DRAG_SMOOTHING: f32 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ResizeHandle {
@@ -48,33 +54,40 @@ struct TableButtonRects {
 
 /// Canvas panel for node-based visualization.
 pub struct CanvasPanel {
-    /// Dragging state
+    // View state
+    pub pan_offset: Vec2,
+    pub zoom: f32,
+    
+    // Smooth animation state
+    pan_velocity: Vec2,
+    target_zoom: f32,
+    target_pan: Vec2,
+    is_panning_with_space: bool,
+    last_frame_time: f64,
+    
+    // Drag state
     dragging_node: Option<NodeId>,
     drag_offset: Vec2,
+    drag_target_pos: Vec2,
+    drag_current_pos: Vec2,
     
-    /// Resizing state
-    resizing_node: Option<(NodeId, ResizeHandle)>,
-    resize_start_size: Vec2,
-    resize_start_pos: Vec2,
-    
-    /// Connection creation state
+    // Connection creation
     connecting_from: Option<NodeId>,
     
-    /// Canvas transform
-    pan_offset: Vec2,
-    zoom: f32,
+    // Resize state
+    resizing_node: Option<(NodeId, ResizeHandle)>,
+    resize_start_pos: Vec2,
+    resize_start_size: Vec2,
     
-    /// Drawing state
+    // Drawing state
     drawing_start: Option<Pos2>,
     current_stroke: Vec<Pos2>,
-    
-    /// Preview shape while drawing
     preview_shape: Option<NodeId>,
     
-    /// Context menu position
+    // UI state
     context_menu_pos: Option<Pos2>,
     
-    /// Performance optimizations
+    // Performance optimization
     visible_rect: Rect,
     dirty_nodes: HashSet<NodeId>,
     spatial_index: HashMap<(i32, i32), SpatialCell>,
@@ -82,7 +95,7 @@ pub struct CanvasPanel {
     frame_count: u64,
     last_interaction_frame: u64,
     
-    /// Table button rectangles for click detection
+    // Button tracking for table nodes
     table_button_rects: HashMap<NodeId, TableButtonRects>,
     show_plot_menu_for_node: Option<NodeId>,
 }
@@ -90,14 +103,21 @@ pub struct CanvasPanel {
 impl CanvasPanel {
     pub fn new(_ctx: std::sync::Arc<pika_core::events::EventBus>) -> Self {
         Self {
-            dragging_node: None,
-            drag_offset: Vec2::ZERO,
-            resizing_node: None,
-            resize_start_size: Vec2::ZERO,
-            resize_start_pos: Vec2::ZERO,
-            connecting_from: None,
             pan_offset: Vec2::ZERO,
             zoom: 1.0,
+            pan_velocity: Vec2::ZERO,
+            target_zoom: 1.0,
+            target_pan: Vec2::ZERO,
+            is_panning_with_space: false,
+            last_frame_time: 0.0,
+            dragging_node: None,
+            drag_offset: Vec2::ZERO,
+            drag_target_pos: Vec2::ZERO,
+            drag_current_pos: Vec2::ZERO,
+            connecting_from: None,
+            resizing_node: None,
+            resize_start_pos: Vec2::ZERO,
+            resize_start_size: Vec2::ZERO,
             drawing_start: None,
             current_stroke: Vec::new(),
             preview_shape: None,
@@ -113,24 +133,55 @@ impl CanvasPanel {
         }
     }
     
-    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, event_tx: &Sender<AppEvent>) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, ctx: &egui::Context, event_tx: &Sender<AppEvent>) -> Response {
+        // First, handle query windows separately (like Pebble)
+        self.show_query_windows(ctx, state);
+        
+        // Then show the main canvas
+        let available_rect = ui.available_rect_before_wrap();
+        let response = ui.allocate_rect(available_rect, Sense::click_and_drag());
+        
+        // Draw the canvas background and grid
+        let painter = ui.painter_at(available_rect);
+        painter.rect_filled(available_rect, 0.0, Color32::from_rgb(18, 18, 18));
+        
+        // Draw grid if enabled
+        if state.canvas_state.show_grid {
+            self.draw_visible_grid(&painter, &available_rect);
+        }
+        
         self.frame_count += 1;
         
-        let (response, painter) = ui.allocate_painter(
-            ui.available_size(),
-            Sense::click_and_drag(),
-        );
+        // Calculate frame delta time for smooth animations
+        let current_time = ui.ctx().input(|i| i.time);
+        let delta_time = if self.last_frame_time > 0.0 {
+            (current_time - self.last_frame_time).min(0.1) // Cap at 100ms to prevent jumps
+        } else {
+            0.016 // 60 FPS default
+        };
+        self.last_frame_time = current_time;
         
-        // Draw the canvas background FIRST
-        painter.rect_filled(
-            response.rect,
-            0.0,
-            Color32::from_rgb(20, 20, 20),
-        );
+        // Update cursor based on current state
+        self.update_cursor(ui, &response, state);
         
-        // Update our internal state from the app state
-        self.zoom = state.canvas_state.zoom;
-        self.pan_offset = state.canvas_state.pan_offset;
+        // Smooth zoom animation
+        if (self.zoom - self.target_zoom).abs() > 0.001 {
+            self.zoom = self.zoom + (self.target_zoom - self.zoom) * ZOOM_SMOOTHING;
+            state.canvas_state.zoom = self.zoom;
+            self.cached_grid = None;
+            ui.ctx().request_repaint();
+        }
+        
+        // Apply pan momentum
+        if self.pan_velocity.length() > PAN_MOMENTUM_THRESHOLD {
+            self.pan_offset += self.pan_velocity * delta_time as f32 * 60.0;
+            self.pan_velocity *= PAN_MOMENTUM_DECAY;
+            state.canvas_state.pan_offset = self.pan_offset;
+            self.cached_grid = None;
+            ui.ctx().request_repaint();
+        } else {
+            self.pan_velocity = Vec2::ZERO;
+        }
         
         // Track if we're interacting for performance optimization
         let is_interacting = response.dragged() || response.clicked() || 
@@ -139,23 +190,46 @@ impl CanvasPanel {
             self.last_interaction_frame = self.frame_count;
         }
         
-        // Handle middle mouse pan
-        if response.dragged_by(egui::PointerButton::Middle) {
-            self.pan_offset += response.drag_delta();
-            state.canvas_state.pan_offset = self.pan_offset;
-            self.cached_grid = None; // Invalidate grid cache
+        // Handle spacebar + drag for pan (Photoshop style)
+        let space_pressed = ui.input(|i| i.key_down(egui::Key::Space));
+        if space_pressed && response.drag_started() {
+            self.is_panning_with_space = true;
+        }
+        if !space_pressed {
+            self.is_panning_with_space = false;
         }
         
-        // Handle zoom with scroll wheel
+        // Handle panning (middle mouse OR space+drag)
+        let is_panning = response.dragged_by(egui::PointerButton::Middle) || 
+                        (self.is_panning_with_space && response.dragged());
+        
+        if is_panning {
+            let delta = response.drag_delta();
+            self.pan_offset += delta;
+            self.pan_velocity = delta / delta_time as f32;
+            state.canvas_state.pan_offset = self.pan_offset;
+            self.cached_grid = None;
+        } else if response.drag_stopped() {
+            // Keep momentum when drag stops
+            // Velocity is already set during dragging
+        }
+        
+        // Handle zoom with scroll wheel - zoom to mouse position
         response.ctx.input(|i| {
-        if response.hovered() {
-                if i.raw_scroll_delta.y != 0.0 {
-                    let zoom_delta = 1.0 + i.raw_scroll_delta.y * 0.01;
-                    self.zoom = (self.zoom * zoom_delta).clamp(0.1, 5.0);
-                    // Zoom towards mouse position
-                    state.canvas_state.zoom = self.zoom;
-                    self.cached_grid = None; // Invalidate grid cache
+            if response.hovered() && i.raw_scroll_delta.y != 0.0 {
+                let zoom_delta = 1.0 + i.raw_scroll_delta.y * 0.01;
+                let new_zoom = (self.target_zoom * zoom_delta).clamp(0.1, 5.0);
+                
+                // Zoom towards mouse position
+                if let Some(mouse_pos) = response.hover_pos() {
+                    let mouse_canvas_before = (mouse_pos - response.rect.min - self.pan_offset) / self.zoom;
+                    self.target_zoom = new_zoom;
+                    let mouse_canvas_after = (mouse_pos - response.rect.min - self.pan_offset) / new_zoom;
+                    self.pan_offset += (mouse_canvas_after - mouse_canvas_before) * new_zoom;
+                    state.canvas_state.pan_offset = self.pan_offset;
                 }
+                
+                self.cached_grid = None;
             }
         });
         
@@ -177,16 +251,6 @@ impl CanvasPanel {
                 pos.y * zoom + pan_offset.y + rect.top(),
             )
         };
-        
-        // Draw grid (cached for performance)
-        if state.canvas_state.show_grid {
-            if self.cached_grid.is_none() {
-                self.cached_grid = Some(self.create_grid_shapes(&response.rect));
-            }
-            if let Some(grid_shapes) = &self.cached_grid {
-                painter.extend(grid_shapes.clone());
-            }
-        }
         
         // Draw connections
         for connection in &state.connections {
@@ -252,16 +316,7 @@ impl CanvasPanel {
             }
         }
         
-        // Double-click to create connections
-        if response.double_clicked() && self.connecting_from.is_none() {
-            if let Some(node_id) = state.selected_node {
-                if let Some(node) = state.get_canvas_node(node_id) {
-                    if let CanvasNodeType::Table { .. } = &node.node_type {
-                        self.connecting_from = Some(node_id);
-                    }
-                }
-            }
-        }
+        // Double-click handled in handle_select_tool for table nodes
         
         // Tool-specific handling BEFORE drawing nodes so preview shapes appear immediately
         match state.tool_mode {
@@ -269,11 +324,11 @@ impl CanvasPanel {
             ToolMode::Pan => {
                 // Pan is handled above with middle mouse, so nothing extra needed here
             },
-            ToolMode::Rectangle => self.handle_shape_tool(&response, state, from_screen, ShapeType::Rectangle),
-            ToolMode::Circle => self.handle_shape_tool(&response, state, from_screen, ShapeType::Circle),
-            ToolMode::Line => self.handle_line_tool(&response, state, from_screen),
-            ToolMode::Draw => self.handle_draw_tool(&response, state, from_screen, &painter, to_screen),
-            ToolMode::Text => self.handle_text_tool(&response, state, from_screen),
+                            ToolMode::Rectangle => { /* Shape tools disabled */ },
+                ToolMode::Circle => { /* Shape tools disabled */ },
+                ToolMode::Line => { /* Line tool disabled */ },
+                            ToolMode::Draw => self.handle_draw_tool(&response, state, from_screen, &painter, to_screen),
+                ToolMode::Text => { /* Text tool disabled */ },
         }
         
         // Update visible rect for frustum culling
@@ -359,43 +414,9 @@ impl CanvasPanel {
             }
         }
 
-        // Handle keyboard input for query editing
-        if let Some(selected_id) = state.selected_node {
-            if let Some(node) = state.get_canvas_node(selected_id) {
-                if let CanvasNodeType::Table { .. } = &node.node_type {
-                    // Handle text input for query
-                    if response.has_focus() {
-                        ui.ctx().input(|i| {
-                            for event in &i.events {
-                                if let egui::Event::Text(text) = event {
-                                    if let Some(query) = state.node_queries.get_mut(&selected_id) {
-                                        query.push_str(text);
-                                    }
-                                }
-                                if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
-                                    if let Some(query) = state.node_queries.get_mut(&selected_id) {
-                                        match key {
-                                            egui::Key::Backspace => {
-                                                query.pop();
-                                            }
-                                            egui::Key::Enter => {
-                                                if modifiers.ctrl || modifiers.command {
-                                                    // Execute query on Ctrl+Enter
-                                                    state.execute_node_query(selected_id);
-                                                } else {
-                                                    query.push('\n');
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
+        // Query editing is now handled in the query window, not directly on the canvas
+        
+        response
     }
     
     fn handle_select_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, to_screen: impl Fn(Pos2) -> Pos2, event_tx: &Sender<AppEvent>) {
@@ -505,6 +526,7 @@ impl CanvasPanel {
             }
         }
         
+        // Handle node dragging with smooth interpolation
         if response.dragged() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let canvas_pos = from_screen(pos);
@@ -540,10 +562,29 @@ impl CanvasPanel {
                         }
                     }
                 }
-                // Handle node dragging
+                // Handle node dragging with smooth interpolation
                 else if let Some(node_id) = self.dragging_node {
+                    // Update target position with grid snapping
+                    let raw_pos = canvas_pos.to_vec2() - self.drag_offset;
+                    let shift_pressed = response.ctx.input(|i| i.modifiers.shift);
+                    self.drag_target_pos = self.snap_to_grid(raw_pos, GRID_SIZE, shift_pressed);
+                    
                     if let Some(node) = state.get_canvas_node_mut(node_id) {
-                        node.position = canvas_pos.to_vec2() - self.drag_offset;
+                        // Initialize current position if needed
+                        if self.drag_current_pos == Vec2::ZERO {
+                            self.drag_current_pos = node.position;
+                        }
+                        
+                        // Smooth interpolation towards target
+                        let diff = self.drag_target_pos - self.drag_current_pos;
+                        self.drag_current_pos += diff * DRAG_SMOOTHING;
+                        node.position = self.drag_current_pos;
+                        
+                        // Request repaint if still moving
+                        if diff.length() > 0.1 {
+                            response.ctx.request_repaint();
+                        }
+                        
                         let _ = event_tx.send(AppEvent::NodeMoved { 
                             id: node_id, 
                             position: node.position 
@@ -556,20 +597,14 @@ impl CanvasPanel {
         if response.drag_stopped() {
             self.dragging_node = None;
             self.resizing_node = None;
+            self.drag_current_pos = Vec2::ZERO;
+            self.drag_target_pos = Vec2::ZERO;
         }
         
-        // Double-click to create connections
-        if response.double_clicked() {
-            if let Some(node_id) = state.selected_node {
-                if let Some(node) = state.get_canvas_node(node_id) {
-                    if let CanvasNodeType::Table { .. } = &node.node_type {
-                        self.connecting_from = Some(node_id);
-                    }
-                }
-            }
-        }
+        // Table nodes on canvas don't open query windows - that's done from the data panel
     }
     
+    /*
     fn handle_shape_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, shape_type: ShapeType) {
         if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos() {
@@ -624,7 +659,9 @@ impl CanvasPanel {
             self.preview_shape = None;
         }
     }
+    */
     
+    /*
     fn handle_line_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2) {
         if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos() {
@@ -651,6 +688,7 @@ impl CanvasPanel {
             self.drawing_start = None;
         }
     }
+    */
     
     fn handle_draw_tool(&mut self, response: &Response, _state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2, painter: &Painter, to_screen: impl Fn(Pos2) -> Pos2) {
         if response.drag_started() {
@@ -683,6 +721,7 @@ impl CanvasPanel {
         }
     }
     
+    /*
     fn handle_text_tool(&mut self, response: &Response, state: &mut AppState, from_screen: impl Fn(Pos2) -> Pos2) {
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
@@ -699,6 +738,7 @@ impl CanvasPanel {
             }
         }
     }
+    */
     
     fn show_node_context_menu(&mut self, ui: &mut Ui, state: &mut AppState, node_id: NodeId) {
         // Get node type first to avoid borrow issues
@@ -737,6 +777,7 @@ impl CanvasPanel {
     }
     
     fn show_canvas_context_menu(&mut self, ui: &mut Ui, state: &mut AppState, pos: Pos2) {
+        /* Note functionality disabled
         if ui.button("Add Note").clicked() {
             let id = NodeId::new();
             let canvas_node = CanvasNode {
@@ -749,9 +790,11 @@ impl CanvasPanel {
             self.context_menu_pos = None;
             ui.close_menu();
         }
+        */
         
         ui.separator();
         
+        /* Shape creation disabled
         ui.menu_button("Add Shape", |ui| {
             if ui.button("Rectangle").clicked() {
                 let id = NodeId::new();
@@ -778,6 +821,7 @@ impl CanvasPanel {
                 ui.close_menu();
             }
         });
+        */
         
         if !state.data_nodes.is_empty() {
             ui.separator();
@@ -831,367 +875,171 @@ impl CanvasPanel {
         }
     }
     
-    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, selected: bool, state: &AppState) -> Option<TableButtonRects> {
-        let rect = Rect::from_min_size(
-            to_screen(Pos2::new(node.position.x, node.position.y)),
-            node.size
-        );
+    fn draw_node(&self, painter: &Painter, node: &CanvasNode, to_screen: impl Fn(Pos2) -> Pos2, is_selected: bool, state: &AppState) -> Option<TableButtonRects> {
+        let pos = to_screen(Pos2::new(node.position.x, node.position.y));
+        let size = node.size * self.zoom;
+        let rect = Rect::from_min_size(pos, size);
+        
+        // Hover effect
+        let is_hovered = painter.ctx().pointer_hover_pos()
+            .map(|p| rect.contains(p))
+            .unwrap_or(false);
         
         match &node.node_type {
             CanvasNodeType::Table { table_info } => {
-                // Draw table node with Pebble-style design
+                // Render table with data preview like Pebble
                 painter.rect_filled(
                     rect,
-                    8.0,
-                    if selected { Color32::from_rgb(45, 45, 45) } else { Color32::from_rgb(35, 35, 35) },
+                    4.0,
+                    Color32::from_gray(35),  // Slightly lighter background
                 );
+                
+                // Border
                 painter.rect_stroke(
                     rect,
-                    8.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(100, 150, 250) } else { Color32::from_gray(60) }),
+                    4.0,
+                    if is_selected {
+                        Stroke::new(2.0, Color32::from_rgb(100, 150, 200))
+                    } else {
+                        Stroke::new(1.0, Color32::from_gray(60))
+                    },
                 );
                 
                 // Title bar with table name
-                let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 40.0));
+                let title_height = 25.0;
+                let title_rect = Rect::from_min_size(rect.min, vec2(rect.width(), title_height));
                 painter.rect_filled(
-                    title_rect, 
-                    egui::Rounding::same(8.0),
-                    Color32::from_rgb(50, 50, 50)
+                    title_rect,
+                    egui::Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 },
+                    Color32::from_gray(45),
                 );
                 
                 painter.text(
                     title_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     &table_info.name,
-                    FontId::proportional(16.0 * self.zoom),
-                    Color32::WHITE,
+                    FontId::proportional(13.0),
+                    Color32::from_gray(220),
                 );
                 
-                // SQL Query display area
-                let query_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(10.0, 50.0),
-                    Vec2::new(rect.width() - 20.0, 40.0),
+                // Draw table data preview
+                let data_rect = Rect::from_min_size(
+                    rect.min + vec2(0.0, title_height),
+                    vec2(rect.width(), rect.height() - title_height)
                 );
                 
-                painter.rect_filled(query_rect, 4.0, Color32::from_rgb(25, 25, 25));
-                painter.rect_stroke(query_rect, 4.0, Stroke::new(1.0, Color32::from_gray(60)));
+                // Create mock data for preview
+                let headers = &table_info.columns[..table_info.columns.len().min(5)]
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>();
                 
-                // Get query or use default
-                let query = state.node_queries.get(&node.id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("SELECT * FROM '{}'", table_info.name));
+                let row_height = 22.0;
+                let header_height = 25.0;
+                let padding = 5.0;
                 
-                painter.text(
-                    query_rect.min + Vec2::new(10.0, 10.0),
-                    egui::Align2::LEFT_TOP,
-                    &format!("SQL Query:\n{}", query),
-                    FontId::monospace(12.0 * self.zoom),
-                    Color32::from_gray(200),
+                // Header background
+                let header_rect = Rect::from_min_size(
+                    data_rect.min,
+                    vec2(data_rect.width(), header_height)
+                );
+                painter.rect_filled(
+                    header_rect,
+                    0.0,
+                    Color32::from_gray(50),
                 );
                 
-                // Results info
-                let row_count = table_info.row_count.unwrap_or(0);
-                let showing_rows = 25; // Default page size
-                let current_page = 1; // TODO: Track current page in state
-                let total_pages = (row_count as f32 / showing_rows as f32).ceil() as usize;
-                
-                painter.text(
-                    rect.min + Vec2::new(10.0, 100.0),
-                    egui::Align2::LEFT_TOP,
-                    &format!("Results: {} rows (showing {}-{})", 
-                        row_count,
-                        (current_page - 1) * showing_rows + 1,
-                        (current_page * showing_rows).min(row_count)
-                    ),
-                    FontId::proportional(13.0 * self.zoom),
-                    Color32::from_gray(180),
-                );
-                
-                // Data table area
-                let table_rect = Rect::from_min_size(
-                    rect.min + Vec2::new(10.0, 125.0),
-                    Vec2::new(rect.width() - 20.0, rect.height() - 180.0),
-                );
-                
-                painter.rect_filled(table_rect, 4.0, Color32::from_rgb(20, 20, 20));
-                painter.rect_stroke(table_rect, 4.0, Stroke::new(1.0, Color32::from_gray(60)));
-                
-                // Get or create preview data
-                if let Some(preview) = state.node_data.get(&node.id) {
-                    // Draw headers
-                    if let Some(headers) = &preview.headers {
-                        let header_height = 30.0;
-                        let header_rect = Rect::from_min_size(
-                            table_rect.min,
-                            Vec2::new(table_rect.width(), header_height)
-                        );
-                        
-                        // Header background
-                        painter.rect_filled(header_rect, 0.0, Color32::from_rgb(30, 30, 30));
-                        
-                        let col_width = table_rect.width() / headers.len().max(1) as f32;
-                        
-                        for (i, header) in headers.iter().enumerate() {
-                            let text_pos = Pos2::new(
-                                table_rect.min.x + i as f32 * col_width + 10.0,
-                                table_rect.min.y + 8.0
-                            );
-                            
-                            painter.text(
-                                text_pos,
-                                egui::Align2::LEFT_TOP,
-                                header,
-                                FontId::proportional(13.0 * self.zoom),
-                                Color32::from_gray(220),
-                            );
-                            
-                            // Column separator
-                            if i > 0 {
-                                painter.line_segment(
-                                    [
-                                        Pos2::new(table_rect.min.x + i as f32 * col_width, table_rect.min.y),
-                                        Pos2::new(table_rect.min.x + i as f32 * col_width, table_rect.min.y + header_height),
-                                    ],
-                                    Stroke::new(1.0, Color32::from_gray(50)),
-                                );
-                            }
-                        }
-                        
-                        // Header separator
-                        painter.line_segment(
-                            [
-                                Pos2::new(table_rect.min.x, table_rect.min.y + header_height),
-                                Pos2::new(table_rect.max.x, table_rect.min.y + header_height),
-                            ],
-                            Stroke::new(1.0, Color32::from_gray(70)),
-                        );
-                        
-                        // Draw rows
-                        if let Some(rows) = &preview.rows {
-                            let row_height = 25.0;
-                            let data_start_y = table_rect.min.y + header_height;
-                            let max_rows = ((table_rect.height() - header_height) / row_height) as usize;
-                            
-                            for (row_idx, row) in rows.iter().take(max_rows).enumerate() {
-                                let row_y = data_start_y + row_idx as f32 * row_height;
-                                
-                                // Alternating row colors
-                                if row_idx % 2 == 1 {
-                                    painter.rect_filled(
-                                        Rect::from_min_size(
-                                            Pos2::new(table_rect.min.x, row_y),
-                                            Vec2::new(table_rect.width(), row_height)
-                                        ),
-                                        0.0,
-                                        Color32::from_rgb(25, 25, 25)
-                                    );
-                                }
-                                
-                                for (col_idx, cell) in row.iter().enumerate() {
-                                    let text_pos = Pos2::new(
-                                        table_rect.min.x + col_idx as f32 * col_width + 10.0,
-                                        row_y + 5.0
-                                    );
-                                    
-                                    painter.text(
-                                        text_pos,
-                                        egui::Align2::LEFT_TOP,
-                                        cell,
-                                        FontId::proportional(12.0 * self.zoom),
-                                        Color32::from_gray(180),
-                                    );
-                                    
-                                    // Column separator
-                                    if col_idx > 0 {
-                                        painter.line_segment(
-                                            [
-                                                Pos2::new(table_rect.min.x + col_idx as f32 * col_width, row_y),
-                                                Pos2::new(table_rect.min.x + col_idx as f32 * col_width, row_y + row_height),
-                                            ],
-                                            Stroke::new(1.0, Color32::from_gray(40)),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // No data yet - show placeholder
+                // Draw headers
+                let col_width = (data_rect.width() - padding * 2.0) / headers.len() as f32;
+                for (i, header) in headers.iter().enumerate() {
+                    let x = data_rect.min.x + padding + i as f32 * col_width;
                     painter.text(
-                        table_rect.center(),
+                        Pos2::new(x + col_width / 2.0, header_rect.center().y),
                         egui::Align2::CENTER_CENTER,
-                        "Click Execute to run query",
-                        FontId::proportional(14.0 * self.zoom),
-                        Color32::from_gray(120),
+                        header,
+                        FontId::proportional(11.0),
+                        Color32::from_gray(200),
                     );
                 }
                 
-                // Pagination controls at bottom
-                let pagination_y = rect.max.y - 40.0;
-                let button_width = 80.0;
-                let button_height = 25.0;
-                
-                // Store button interactions for later processing
-                let mut clicked_previous = false;
-                let mut clicked_next = false;
-                let mut clicked_execute = false;
-                let mut clicked_create_plot = false;
-                let mut clicked_export_page = false;
-                let mut clicked_export_all = false;
-                
-                // Previous button
-                let prev_rect = Rect::from_min_size(
-                    Pos2::new(rect.min.x + 10.0, pagination_y),
-                    Vec2::new(button_width, button_height)
-                );
-                
-                let prev_enabled = state.node_data.get(&node.id)
-                    .map(|d| d.current_page > 0)
-                    .unwrap_or(false);
+                // Draw some sample data rows
+                let visible_rows = ((data_rect.height() - header_height) / row_height).floor() as usize;
+                for row_idx in 0..visible_rows.min(5) {
+                    let y = data_rect.min.y + header_height + row_idx as f32 * row_height;
                     
-                painter.rect_filled(
-                    prev_rect, 
-                    4.0, 
-                    if prev_enabled { Color32::from_rgb(40, 40, 40) } else { Color32::from_rgb(25, 25, 25) }
-                );
-                painter.rect_stroke(
-                    prev_rect, 
-                    4.0, 
-                    Stroke::new(1.0, if prev_enabled { Color32::from_gray(80) } else { Color32::from_gray(40) })
-                );
-                painter.text(
-                    prev_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Previous",
-                    FontId::proportional(12.0 * self.zoom),
-                    if prev_enabled { Color32::from_gray(200) } else { Color32::from_gray(100) },
-                );
-                
-                // Page info
-                let current_page = state.node_data.get(&node.id)
-                    .map(|d| d.current_page + 1)
-                    .unwrap_or(1);
-                let total_pages = state.node_data.get(&node.id)
-                    .and_then(|d| d.total_rows.map(|total| ((total as f32) / d.page_size as f32).ceil() as usize))
-                    .unwrap_or(1);
+                    // Alternate row colors
+                    if row_idx % 2 == 1 {
+                        painter.rect_filled(
+                            Rect::from_min_size(
+                                Pos2::new(data_rect.min.x, y),
+                                vec2(data_rect.width(), row_height)
+                            ),
+                            0.0,
+                            Color32::from_gray(40),
+                        );
+                    }
                     
-                painter.text(
-                    Pos2::new(rect.min.x + 100.0, pagination_y + 5.0),
-                    egui::Align2::LEFT_TOP,
-                    &format!("Page {} of {}", current_page, total_pages.max(1)),
-                    FontId::proportional(12.0 * self.zoom),
-                    Color32::from_gray(180),
-                );
+                    // Draw row data
+                    for col_idx in 0..headers.len() {
+                        let x = data_rect.min.x + padding + col_idx as f32 * col_width;
+                        let sample_value = match (table_info.name.as_str(), col_idx) {
+                            ("MOCK_DATA_0", 0) => (row_idx + 1).to_string(),  // ID
+                            ("MOCK_DATA_0", 1) => format!("Customer_{:03}", row_idx),  // Name
+                            ("MOCK_DATA_0", 2) => format!("customer{}@example.com", row_idx),  // Email
+                            ("MOCK_DATA_0", 3) => "2024-01-01".to_string(),  // Date
+                            ("MOCK_DATA_0", 4) => format!("{:.2}", 100.0 + row_idx as f64 * 50.0),  // Amount
+                            ("MOCK_DATA_0", _) => "...".to_string(),
+                            
+                            ("MOCK_DATA_1", 0) => (row_idx + 1).to_string(),  // ID
+                            ("MOCK_DATA_1", 1) => format!("Product_{}", row_idx),  // Product
+                            ("MOCK_DATA_1", 2) => ["Available", "Out of Stock", "Limited"][row_idx % 3].to_string(),  // Status
+                            ("MOCK_DATA_1", 3) => format!("{}", 10 + row_idx * 5),  // Quantity
+                            ("MOCK_DATA_1", 4) => format!("${:.2}", 19.99 + row_idx as f64 * 10.0),  // Price
+                            ("MOCK_DATA_1", _) => "...".to_string(),
+                            
+                            ("MOCK_DATA_2", 0) => format!("ORD{:04}", row_idx + 1000),  // Order ID
+                            ("MOCK_DATA_2", 1) => format!("Customer {}", row_idx + 1),  // Customer
+                            ("MOCK_DATA_2", 2) => ["Pending", "Shipped", "Delivered"][row_idx % 3].to_string(),  // Status
+                            ("MOCK_DATA_2", 3) => format!("${:.2}", 250.0 + row_idx as f64 * 100.0),  // Total
+                            ("MOCK_DATA_2", 4) => "2024-01-15".to_string(),  // Date
+                            ("MOCK_DATA_2", _) => "...".to_string(),
+                            
+                            _ => format!("Row{}_Col{}", row_idx, col_idx),
+                        };
+                        
+                        painter.text(
+                            Pos2::new(x + col_width / 2.0, y + row_height / 2.0),
+                            egui::Align2::CENTER_CENTER,
+                            sample_value,
+                            FontId::proportional(10.0),
+                            Color32::from_gray(180),
+                        );
+                    }
+                }
                 
-                // Next button
-                let next_rect = Rect::from_min_size(
-                    Pos2::new(rect.min.x + 200.0, pagination_y),
-                    Vec2::new(button_width, button_height)
-                );
-                
-                let next_enabled = state.node_data.get(&node.id)
-                    .map(|_d| current_page < total_pages)
-                    .unwrap_or(false);
-                    
-                painter.rect_filled(
-                    next_rect, 
-                    4.0, 
-                    if next_enabled { Color32::from_rgb(40, 40, 40) } else { Color32::from_rgb(25, 25, 25) }
-                );
-                painter.rect_stroke(
-                    next_rect, 
-                    4.0, 
-                    Stroke::new(1.0, if next_enabled { Color32::from_gray(80) } else { Color32::from_gray(40) })
-                );
+                // Show row count at bottom
+                let info_y = rect.max.y - 15.0;
                 painter.text(
-                    next_rect.center(),
+                    Pos2::new(rect.center().x, info_y),
                     egui::Align2::CENTER_CENTER,
-                    "Next",
-                    FontId::proportional(12.0 * self.zoom),
-                    if next_enabled { Color32::from_gray(200) } else { Color32::from_gray(100) },
+                    format!("{} rows total", table_info.row_count.unwrap_or(0)),
+                    FontId::proportional(10.0),
+                    Color32::from_gray(120),
                 );
                 
-                // Execute button (moved here from query area)
-                let execute_rect = Rect::from_min_size(
-                    Pos2::new(rect.center().x - 45.0, pagination_y),
-                    Vec2::new(90.0, button_height)
-                );
-                painter.rect_filled(execute_rect, 4.0, Color32::from_rgb(50, 100, 50));
-                painter.rect_stroke(execute_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(80, 150, 80)));
-                painter.text(
-                    execute_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Execute",
-                    FontId::proportional(12.0 * self.zoom),
-                    Color32::WHITE,
-                );
-                
-                // Create Plot button  
-                let create_plot_rect = Rect::from_min_size(
-                    Pos2::new(rect.max.x - 310.0, pagination_y),
-                    Vec2::new(100.0, button_height)
-                );
-                painter.rect_filled(create_plot_rect, 4.0, Color32::from_rgb(50, 50, 100));
-                painter.rect_stroke(create_plot_rect, 4.0, Stroke::new(1.0, Color32::from_rgb(100, 100, 150)));
-                painter.text(
-                    create_plot_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Create Plot",
-                    FontId::proportional(12.0 * self.zoom),
-                    Color32::WHITE,
-                );
-                
-                // Export buttons on the right
-                let export_page_rect = Rect::from_min_size(
-                    Pos2::new(rect.max.x - 200.0, pagination_y),
-                    Vec2::new(90.0, button_height)
-                );
-                painter.rect_filled(export_page_rect, 4.0, Color32::from_rgb(40, 40, 40));
-                painter.rect_stroke(export_page_rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
-                painter.text(
-                    export_page_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Export Page",
-                    FontId::proportional(12.0 * self.zoom),
-                    Color32::from_gray(200),
-                );
-                
-                let export_all_rect = Rect::from_min_size(
-                    Pos2::new(rect.max.x - 100.0, pagination_y),
-                    Vec2::new(90.0, button_height)
-                );
-                painter.rect_filled(export_all_rect, 4.0, Color32::from_rgb(40, 40, 40));
-                painter.rect_stroke(export_all_rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
-                painter.text(
-                    export_all_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Export All",
-                    FontId::proportional(12.0 * self.zoom),
-                    Color32::from_gray(200),
-                );
-                
-                // Check for button clicks (we need to handle this in the interaction logic)
-                // For now, store the button rects for click detection later
-                Some(TableButtonRects {
-                    previous: prev_rect,
-                    next: next_rect,
-                    execute: execute_rect,
-                    create_plot: create_plot_rect,
-                    export_page: export_page_rect,
-                    export_all: export_all_rect,
-                })
+                None // No button rects for table nodes
             }
             CanvasNodeType::Plot { plot_type } => {
                 // Draw plot node with professional styling
                 painter.rect_filled(
                     rect,
                     8.0,
-                    if selected { Color32::from_rgb(45, 45, 45) } else { Color32::from_rgb(35, 35, 35) },
+                    if is_selected { Color32::from_rgb(45, 45, 45) } else { Color32::from_rgb(35, 35, 35) },
                 );
                 painter.rect_stroke(
                     rect,
                     8.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(250, 150, 100) } else { Color32::from_gray(60) }),
+                    Stroke::new(2.0, if is_selected { Color32::from_rgb(250, 150, 100) } else { Color32::from_gray(60) }),
                 );
                 
                 // Title bar
@@ -1372,17 +1220,18 @@ impl CanvasPanel {
                 }
                 None
             }
+            /* Note and Shape nodes disabled
             CanvasNodeType::Note { content } => {
                 // Draw note node
                 painter.rect_filled(
                     rect,
                     5.0,
-                    if selected { Color32::from_rgb(80, 80, 60) } else { Color32::from_rgb(60, 60, 40) },
+                    if is_selected { Color32::from_rgb(80, 80, 60) } else { Color32::from_rgb(60, 60, 40) },
                 );
                 painter.rect_stroke(
                     rect,
                     5.0,
-                    Stroke::new(2.0, if selected { Color32::from_rgb(250, 250, 100) } else { Color32::from_gray(100) }),
+                    Stroke::new(2.0, if is_selected { Color32::from_rgb(250, 250, 100) } else { Color32::from_gray(100) }),
                 );
                 
         painter.text(
@@ -1423,7 +1272,7 @@ impl CanvasPanel {
                 }
                 
                 // Draw selection box for shapes
-                if selected {
+                if is_selected {
                     painter.rect_stroke(
                         rect,
                         0.0,
@@ -1432,35 +1281,42 @@ impl CanvasPanel {
                 }
                 None
             }
+            */
         }
     }
     
     fn draw_grid(&self, painter: &Painter, rect: &Rect) {
-        let grid_size = 20.0 * self.zoom;
+        let grid_size = GRID_SIZE * self.zoom;
         let grid_color = Color32::from_gray(30);
         
-        // Calculate grid bounds
-        let left = rect.left() - (rect.left() - self.pan_offset.x).rem_euclid(grid_size);
-        let top = rect.top() - (rect.top() - self.pan_offset.y).rem_euclid(grid_size);
+        // Extend bounds to ensure grid covers entire visible area
+        let extended_rect = rect.expand(VISIBLE_MARGIN);
+        
+        // Calculate grid bounds with proper offset accounting
+        let offset_x = self.pan_offset.x % grid_size;
+        let offset_y = self.pan_offset.y % grid_size;
+        
+        let left = extended_rect.left() - (extended_rect.left() - offset_x).rem_euclid(grid_size);
+        let top = extended_rect.top() - (extended_rect.top() - offset_y).rem_euclid(grid_size);
         
         // Draw vertical lines
         let mut x = left;
-            while x < rect.right() {
-                painter.line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+        while x <= extended_rect.right() {
+            painter.line_segment(
+                [Pos2::new(x, extended_rect.top()), Pos2::new(x, extended_rect.bottom())],
                 Stroke::new(1.0, grid_color),
-                );
-                x += grid_size;
-            }
+            );
+            x += grid_size;
+        }
             
         // Draw horizontal lines
         let mut y = top;
-            while y < rect.bottom() {
-                painter.line_segment(
-                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+        while y <= extended_rect.bottom() {
+            painter.line_segment(
+                [Pos2::new(extended_rect.left(), y), Pos2::new(extended_rect.right(), y)],
                 Stroke::new(1.0, grid_color),
-                );
-                y += grid_size;
+            );
+            y += grid_size;
         }
     }
     
@@ -1526,30 +1382,34 @@ impl CanvasPanel {
     // Performance optimization: Create grid shapes once and cache them
     fn create_grid_shapes(&self, rect: &Rect) -> Vec<Shape> {
         let mut shapes = Vec::new();
-        let grid_size = 50.0 * self.zoom;
-        let grid_color = Color32::from_gray(40);
+        let grid_size = GRID_SIZE * self.zoom;
+        let grid_color = Color32::from_gray(30);
         
-        // Calculate grid bounds
-        let start_x = ((rect.min.x - self.pan_offset.x) / grid_size).floor() * grid_size + self.pan_offset.x;
-        let start_y = ((rect.min.y - self.pan_offset.y) / grid_size).floor() * grid_size + self.pan_offset.y;
-        let end_x = rect.max.x;
-        let end_y = rect.max.y;
+        // Extend bounds to ensure grid covers entire visible area
+        let extended_rect = rect.expand(VISIBLE_MARGIN);
+        
+        // Calculate grid bounds with proper offset accounting
+        let offset_x = self.pan_offset.x % grid_size;
+        let offset_y = self.pan_offset.y % grid_size;
+        
+        let left = extended_rect.left() - (extended_rect.left() - offset_x).rem_euclid(grid_size);
+        let top = extended_rect.top() - (extended_rect.top() - offset_y).rem_euclid(grid_size);
         
         // Vertical lines
-        let mut x = start_x;
-        while x <= end_x {
+        let mut x = left;
+        while x <= extended_rect.right() {
             shapes.push(Shape::LineSegment {
-                points: [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
+                points: [Pos2::new(x, extended_rect.top()), Pos2::new(x, extended_rect.bottom())],
                 stroke: Stroke::new(1.0, grid_color).into(),
             });
             x += grid_size;
         }
         
         // Horizontal lines
-        let mut y = start_y;
-        while y <= end_y {
+        let mut y = top;
+        while y <= extended_rect.bottom() {
             shapes.push(Shape::LineSegment {
-                points: [Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, y)],
+                points: [Pos2::new(extended_rect.left(), y), Pos2::new(extended_rect.right(), y)],
                 stroke: Stroke::new(1.0, grid_color).into(),
             });
             y += grid_size;
@@ -1647,5 +1507,377 @@ impl CanvasPanel {
                 ui.close_menu();
             }
         });
+    }
+
+    // Add this new method for cursor feedback
+    fn update_cursor(&self, ui: &mut Ui, response: &Response, state: &AppState) {
+        if !response.hovered() {
+            return;
+        }
+        
+        let space_pressed = ui.input(|i| i.key_down(egui::Key::Space));
+        
+        // Set cursor based on current state and tool
+        if space_pressed || response.dragged_by(egui::PointerButton::Middle) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        } else if self.is_panning_with_space {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else {
+            match state.tool_mode {
+                ToolMode::Select => {
+                    // Check if hovering over a node or resize handle
+                    if self.dragging_node.is_some() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if let Some(pos) = response.hover_pos() {
+                        let canvas_pos = self.screen_to_canvas(pos, response.rect);
+                        
+                        // Check resize handles first
+                        if let Some(selected_id) = state.selected_node {
+                            if let Some(node) = state.get_canvas_node(selected_id) {
+                                if let Some(handle) = self.get_resize_handle_at_pos(node, canvas_pos, |p| self.canvas_to_screen(p, response.rect)) {
+                                    match handle {
+                                        ResizeHandle::TopLeft | ResizeHandle::BottomRight => {
+                                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+                                        }
+                                        ResizeHandle::TopRight | ResizeHandle::BottomLeft => {
+                                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNeSw);
+                                        }
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        
+                        // Check if hovering over a node
+                        if self.find_node_at_pos(state, canvas_pos).is_some() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        } else {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+                        }
+                    }
+                }
+                ToolMode::Pan => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+                ToolMode::Draw => ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair),
+                ToolMode::Text => ui.ctx().set_cursor_icon(egui::CursorIcon::Text),
+                _ => ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair),
+            }
+        }
+    }
+    
+    // Helper methods for coordinate conversion
+    fn screen_to_canvas(&self, pos: Pos2, rect: Rect) -> Pos2 {
+        Pos2::new(
+            (pos.x - rect.left() - self.pan_offset.x) / self.zoom,
+            (pos.y - rect.top() - self.pan_offset.y) / self.zoom,
+        )
+    }
+    
+    fn canvas_to_screen(&self, pos: Pos2, rect: Rect) -> Pos2 {
+        Pos2::new(
+            pos.x * self.zoom + self.pan_offset.x + rect.left(),
+            pos.y * self.zoom + self.pan_offset.y + rect.top(),
+        )
+    }
+    
+    // Add grid snapping helper
+    fn snap_to_grid(&self, pos: Vec2, grid_size: f32, shift_pressed: bool) -> Vec2 {
+        if shift_pressed {
+            // Hold shift to disable snapping
+            pos
+        } else {
+            // Snap to grid in canvas space (not screen space)
+            Vec2::new(
+                (pos.x / GRID_SIZE).round() * GRID_SIZE,
+                (pos.y / GRID_SIZE).round() * GRID_SIZE,
+            )
+        }
+    }
+    
+    // Visual feedback for snapping
+    fn draw_snap_guides(&self, painter: &Painter, pos: Pos2, to_screen: impl Fn(Pos2) -> Pos2, shift_pressed: bool) {
+        let snapped = self.snap_to_grid(pos.to_vec2(), GRID_SIZE, shift_pressed);
+        if (snapped - pos.to_vec2()).length() < 5.0 {
+            // Draw snap indicator
+            let screen_pos = to_screen(Pos2::new(snapped.x, snapped.y));
+            painter.circle_filled(screen_pos, 3.0, Color32::from_rgba_premultiplied(100, 150, 250, 128));
+            
+            // Draw alignment guides
+            let guide_color = Color32::from_rgba_premultiplied(100, 150, 250, 64);
+            let guide_stroke = Stroke::new(1.0, guide_color);
+            
+            // Vertical guide
+            painter.line_segment(
+                [
+                    Pos2::new(screen_pos.x, screen_pos.y - 20.0),
+                    Pos2::new(screen_pos.x, screen_pos.y + 20.0),
+                ],
+                guide_stroke,
+            );
+            
+            // Horizontal guide
+            painter.line_segment(
+                [
+                    Pos2::new(screen_pos.x - 20.0, screen_pos.y),
+                    Pos2::new(screen_pos.x + 20.0, screen_pos.y),
+                ],
+                guide_stroke,
+            );
+        }
+    }
+    
+    /// Show query windows as separate egui Windows (like Pebble)
+    fn show_query_windows(&mut self, ctx: &egui::Context, state: &mut AppState) {
+        let mut windows_to_close = Vec::new();
+        let mut windows_to_execute = Vec::new();
+        
+        // Collect the node IDs first to avoid borrow checker issues
+        let window_ids: Vec<NodeId> = state.query_windows.keys().cloned().collect();
+        
+        for node_id in window_ids {
+            if let Some(window) = state.query_windows.get_mut(&node_id) {
+                if !window.is_open {
+                    windows_to_close.push(node_id);
+                    continue;
+                }
+                
+                let mut open = true;
+                let mut should_execute = false;
+                let mut page_changed = false;
+                let window_id = node_id; // Copy for use in closure
+                
+                egui::Window::new(&window.title)
+                    .id(egui::Id::new(format!("query_window_{:?}", node_id)))
+                    .default_size([600.0, 400.0])
+                    .resizable(true)
+                    .collapsible(true)
+                    .open(&mut open)
+                    .show(ctx, |ui| {
+                        // Query editor section
+                        ui.group(|ui| {
+                            ui.label("SQL Query:");
+                            
+                            let response = egui::TextEdit::multiline(&mut window.query)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(3)
+                                .show(ui);
+                            
+                            // Execute on Ctrl+Enter
+                            if response.response.has_focus() 
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl) {
+                                should_execute = true;
+                            }
+                        });
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("▶ Execute").clicked() {
+                                should_execute = true;
+                            }
+                            
+                            ui.separator();
+                            
+                            if ui.button("Export Page").clicked() {
+                                // Export current page
+                            }
+                            
+                            if ui.button("Export All").clicked() {
+                                // Export all results
+                            }
+                        });
+                        
+                        ui.separator();
+                        
+                        // Error display
+                        if let Some(error) = &window.error {
+                            ui.colored_label(egui::Color32::from_rgb(255, 100, 100), format!("❌ {}", error));
+                            ui.separator();
+                        }
+                        
+                        // Results display
+                        if let Some(result) = &window.result {
+                            ui.label(format!("Results: {} rows (showing page {} of {})", 
+                                result.total_rows, 
+                                window.page + 1,
+                                (result.total_rows as f32 / window.page_size as f32).ceil() as usize
+                            ));
+                            
+                            // Table display using egui_extras
+                            egui::ScrollArea::both()
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    use egui_extras::{TableBuilder, Column};
+                                    
+                                    TableBuilder::new(ui)
+                                        .striped(true)
+                                        .resizable(true)
+                                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                                        .columns(Column::initial(100.0).resizable(true), result.columns.len())
+                                        .header(20.0, |mut header| {
+                                            for column in &result.columns {
+                                                header.col(|ui| {
+                                                    ui.strong(column);
+                                                });
+                                            }
+                                        })
+                                        .body(|mut body| {
+                                            for row in &result.rows {
+                                                body.row(20.0, |mut row_ui| {
+                                                    for value in row {
+                                                        row_ui.col(|ui| {
+                                                            ui.label(value);
+                                                        });
+                                                    }
+                                                });
+                                            }
+                                        });
+                                });
+                            
+                            // Pagination controls
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                if ui.button("◀ Previous").clicked() && window.page > 0 {
+                                    window.page -= 1;
+                                    page_changed = true;
+                                }
+                                
+                                ui.label(format!("Page {} of {}", 
+                                    window.page + 1,
+                                    (result.total_rows as f32 / window.page_size as f32).ceil() as usize
+                                ));
+                                
+                                if ui.button("Next ▶").clicked() {
+                                    let max_page = (result.total_rows as f32 / window.page_size as f32).ceil() as usize - 1;
+                                    if window.page < max_page {
+                                        window.page += 1;
+                                        page_changed = true;
+                                    }
+                                }
+                                
+                                ui.separator();
+                                
+                                ui.label("Page size:");
+                                if ui.add(egui::DragValue::new(&mut window.page_size).range(10..=100)).changed() {
+                                    window.page = 0; // Reset to first page
+                                    page_changed = true;
+                                }
+                            });
+                        }
+                    });
+                    
+                window.is_open = open;
+                
+                // Track windows that need query execution
+                if should_execute || page_changed {
+                    windows_to_execute.push(window_id);
+                }
+            }
+        }
+        
+        // Execute queries for windows that need it
+        for node_id in windows_to_execute {
+            self.execute_query_for_window(state, node_id);
+        }
+        
+        // Remove closed windows
+        for id in windows_to_close {
+            state.query_windows.remove(&id);
+        }
+    }
+
+    fn execute_query_for_window(&mut self, state: &mut AppState, node_id: NodeId) {
+        // Get the table info first to avoid borrow checker issues
+        let table_info_opt = state.get_canvas_node(node_id)
+            .and_then(|node| match &node.node_type {
+                CanvasNodeType::Table { table_info } => Some(table_info.clone()),
+                _ => None,
+            });
+            
+        if let Some(table_info) = table_info_opt {
+            if let Some(window) = state.query_windows.get_mut(&node_id) {
+                // Generate mock query results
+                let headers: Vec<String> = table_info.columns.iter().map(|c| c.name.clone()).collect();
+                let mut rows = Vec::new();
+                
+                // Calculate rows for current page
+                let start_row = window.page * window.page_size;
+                let end_row = ((window.page + 1) * window.page_size).min(table_info.row_count.unwrap_or(100));
+                
+                // Generate mock data for the current page
+                for i in start_row..end_row {
+                    let mut row = Vec::new();
+                    for col in &table_info.columns {
+                        let value = match col.data_type.to_uppercase().as_str() {
+                            "INTEGER" => (i + 1).to_string(),
+                            "TEXT" | "VARCHAR" => {
+                                match col.name.to_lowercase().as_str() {
+                                    "first_name" => ["John", "Jane", "Bob", "Alice", "Charlie", "David", "Emma", "Frank", "Grace", "Henry"][i % 10].to_string(),
+                                    "last_name" => ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"][i % 10].to_string(),
+                                    "product_name" => format!("Product {}", i + 1),
+                                    "email" => format!("user{}@example.com", i + 1),
+                                    "gender" => if i % 2 == 0 { "Male" } else { "Female" }.to_string(),
+                                    "ip_address" => format!("192.168.1.{}", (i % 255) + 1),
+                                    "category" => ["Electronics", "Clothing", "Food", "Books", "Toys"][i % 5].to_string(),
+                                    "location" => ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix"][i % 5].to_string(),
+                                    _ => format!("{} {}", col.name, i + 1),
+                                }
+                            }
+                            "REAL" | "FLOAT" | "DOUBLE" => {
+                                match col.name.to_lowercase().as_str() {
+                                    "price" => format!("{:.2}", (i + 1) as f64 * 9.99),
+                                    "temperature" => format!("{:.1}", 20.0 + (i as f64 * 0.5)),
+                                    "humidity" => format!("{:.1}", 40.0 + (i as f64 * 0.3)),
+                                    _ => format!("{:.2}", (i + 1) as f64 * 10.5),
+                                }
+                            }
+                            "BOOLEAN" | "BOOL" => {
+                                if i % 2 == 0 { "true" } else { "false" }.to_string()
+                            }
+                            _ => format!("Data {}", i + 1),
+                        };
+                        row.push(value);
+                    }
+                    rows.push(row);
+                }
+                
+                window.result = Some(crate::state::QueryWindowResult {
+                    columns: headers,
+                    rows,
+                    total_rows: table_info.row_count.unwrap_or(100),
+                });
+                window.error = None;
+            }
+        }
+    }
+
+    fn draw_visible_grid(&self, painter: &Painter, rect: &Rect) {
+        let grid_size = GRID_SIZE * self.zoom;
+        let grid_color = Color32::from_gray(30);
+        
+        // Calculate grid bounds with proper offset accounting
+        let offset_x = self.pan_offset.x % grid_size;
+        let offset_y = self.pan_offset.y % grid_size;
+        
+        let left = rect.left() - (rect.left() - offset_x).rem_euclid(grid_size);
+        let top = rect.top() - (rect.top() - offset_y).rem_euclid(grid_size);
+        
+        // Vertical lines
+        let mut x = left;
+        while x <= rect.right() {
+            painter.line_segment(
+                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                Stroke::new(1.0, grid_color),
+            );
+            x += grid_size;
+        }
+        
+        // Horizontal lines
+        let mut y = top;
+        while y <= rect.bottom() {
+            painter.line_segment(
+                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                Stroke::new(1.0, grid_color),
+            );
+            y += grid_size;
+        }
     }
 }

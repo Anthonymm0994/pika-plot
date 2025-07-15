@@ -77,6 +77,7 @@ impl PropertiesPanel {
                         
                         // TODO: Add plot-specific configuration UI
                     }
+                    /* Note and Shape nodes disabled
                     CanvasNodeType::Note { content } => {
                         ui.label("📝 Note");
                         ui.separator();
@@ -93,15 +94,16 @@ impl PropertiesPanel {
                         ui.label(format!("Type: {:?}", shape_type));
                         
                         ui.horizontal(|ui| {
-                            ui.label("Position:");
-                            ui.label(format!("({:.0}, {:.0})", node.position.x, node.position.y));
+                            ui.label("Width:");
+                            ui.add(DragValue::new(&mut node.size.x).speed(1.0));
                         });
                         
                         ui.horizontal(|ui| {
-                            ui.label("Size:");
-                            ui.label(format!("({:.0}, {:.0})", node.size.x, node.size.y));
+                            ui.label("Height:");
+                            ui.add(DragValue::new(&mut node.size.y).speed(1.0));
                         });
                     }
+                    */
                 }
                 
                 ui.separator();

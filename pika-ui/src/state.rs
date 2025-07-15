@@ -86,16 +86,27 @@ pub struct CanvasNode {
 pub enum CanvasNodeType {
     Table { table_info: TableInfo },
     Plot { plot_type: String },
-    Note { content: String },
-    Shape { shape_type: ShapeType },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ShapeType {
-    Rectangle,
-    Circle,
-    Line { end: egui::Vec2 },
-    Arrow { end: egui::Vec2 },
+/// Query window state similar to Pebble
+#[derive(Debug, Clone)]
+pub struct QueryWindow {
+    pub id: NodeId,
+    pub title: String,
+    pub query: String,
+    pub result: Option<QueryWindowResult>,
+    pub error: Option<String>,
+    pub page: usize,
+    pub page_size: usize,
+    pub is_open: bool,
+}
+
+/// Query results for window display (different from pika_core::types::QueryResult)
+#[derive(Debug, Clone)]
+pub struct QueryWindowResult {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub total_rows: usize,
 }
 
 /// Main application state
@@ -112,6 +123,7 @@ pub struct AppState {
     pub show_export_dialog: bool,
     pub notification: Option<String>,
     pub plot_configs: HashMap<NodeId, PlotConfig>,
+    pub query_windows: HashMap<NodeId, QueryWindow>,
     pub canvas_state: CanvasState,
     pub tables: Vec<TableInfo>, // Convenience alias for data sources
     pub canvas_nodes: HashMap<NodeId, CanvasNode>,
@@ -157,6 +169,7 @@ impl AppState {
             show_export_dialog: false,
             notification: None,
             plot_configs: HashMap::new(),
+            query_windows: HashMap::new(),
             canvas_state: CanvasState::default(),
             tables: vec![],
             canvas_nodes: HashMap::new(),
@@ -199,25 +212,54 @@ impl AppState {
             });
             
         if let Some(table_info) = table_info_opt {
-            // Load sample data from the table
-            // For now, create mock data - in real implementation, this would load from the actual data source
-            let preview = NodeDataPreview {
-                headers: Some(table_info.columns.iter().map(|c| c.name.clone()).collect()),
-                rows: Some(vec![
-                    vec!["1".to_string(), "Sample Data".to_string(), "100".to_string()],
-                    vec!["2".to_string(), "More Data".to_string(), "200".to_string()],
-                    vec!["3".to_string(), "Another Row".to_string(), "300".to_string()],
-                ]),
-                total_rows: Some(3),
-                current_page: 0,
-                page_size: 25,
-            };
-            self.node_data.insert(node_id, preview);
+            // Get the default query
+            let query = self.node_queries.get(&node_id)
+                .cloned()
+                .unwrap_or_else(|| format!("SELECT * FROM {} LIMIT 10", table_info.name));
             
-            // Initialize default query for this node
-            if !self.node_queries.contains_key(&node_id) {
-                self.node_queries.insert(node_id, format!("SELECT * FROM {} LIMIT 10", table_info.name));
+            // Generate mock data based on column types
+            let headers: Vec<String> = table_info.columns.iter().map(|c| c.name.clone()).collect();
+            let mut rows = Vec::new();
+            
+            // Generate 10 rows of mock data
+            for i in 0..10 {
+                let mut row = Vec::new();
+                for col in &table_info.columns {
+                    let value = match col.data_type.as_str() {
+                        "INTEGER" | "integer" => (i + 1).to_string(),
+                        "TEXT" | "text" | "VARCHAR" | "varchar" => {
+                            match col.name.to_lowercase().as_str() {
+                                "first_name" => ["John", "Jane", "Bob", "Alice", "Charlie", "David", "Emma", "Frank", "Grace", "Henry"][i % 10].to_string(),
+                                "last_name" => ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"][i % 10].to_string(),
+                                "name" => format!("Sample {}", i + 1),
+                                "email" => format!("user{}@example.com", i + 1),
+                                "gender" => if i % 2 == 0 { "Male" } else { "Female" }.to_string(),
+                                "ip_address" => format!("192.168.1.{}", i + 1),
+                                _ => format!("{} {}", col.name, i + 1),
+                            }
+                        }
+                        "REAL" | "real" | "FLOAT" | "float" | "DOUBLE" | "double" => {
+                            format!("{:.2}", (i + 1) as f64 * 10.5)
+                        }
+                        "BOOLEAN" | "boolean" | "BOOL" | "bool" => {
+                            if i % 2 == 0 { "true" } else { "false" }.to_string()
+                        }
+                        _ => format!("Data {}", i + 1),
+                    };
+                    row.push(value);
+                }
+                rows.push(row);
             }
+            
+            let preview = NodeDataPreview {
+                headers: Some(headers),
+                rows: Some(rows),
+                total_rows: Some(table_info.row_count.unwrap_or(100)), // Use actual row count if available
+                current_page: 0,
+                page_size: 25, // Default page size like Pebble
+            };
+            
+            self.node_data.insert(node_id, preview);
         }
     }
     

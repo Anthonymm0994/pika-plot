@@ -13,7 +13,7 @@ use crate::{
         status_bar::StatusBar, 
         properties::PropertiesPanel,
     },
-    state::{AppState, ToolMode},
+    state::{AppState, ToolMode, QueryWindow},
     shortcuts::ShortcutManager,
     widgets::file_import_dialog::FileImportDialog,
     screens::FileConfigScreen,
@@ -79,18 +79,15 @@ impl CanvasToolbar {
     
     fn show(&mut self, ui: &mut egui::Ui, state: &mut AppState) {
         ui.horizontal(|ui| {
+            // Tool selection
             ui.label("Tools:");
-            
             if ui.selectable_label(matches!(state.tool_mode, ToolMode::Select), "Select").clicked() {
                 state.tool_mode = ToolMode::Select;
-            }
-            if ui.selectable_label(matches!(state.tool_mode, ToolMode::Pan), "Pan").clicked() {
-                state.tool_mode = ToolMode::Pan;
             }
             
             ui.separator();
             
-            // Drawing tools
+            // Shape tools
             if ui.selectable_label(matches!(state.tool_mode, ToolMode::Rectangle), "□ Rectangle").clicked() {
                 state.tool_mode = ToolMode::Rectangle;
             }
@@ -127,50 +124,6 @@ impl CanvasToolbar {
             ui.checkbox(&mut state.canvas_state.show_grid, "Show Grid");
             
             ui.separator();
-            
-            // Debug: Add sample data button
-            if ui.button("Add Sample Data").clicked() {
-                // Create a sample table info
-                let table_info = pika_core::types::TableInfo {
-                    name: "Sample Data".to_string(),
-                    columns: vec![
-                        pika_core::types::ColumnInfo {
-                            name: "id".to_string(),
-                            data_type: "integer".to_string(),
-                            nullable: false,
-                        },
-                        pika_core::types::ColumnInfo {
-                            name: "name".to_string(),
-                            data_type: "text".to_string(),
-                            nullable: false,
-                        },
-                        pika_core::types::ColumnInfo {
-                            name: "value".to_string(),
-                            data_type: "real".to_string(),
-                            nullable: true,
-                        },
-                    ],
-                    row_count: Some(10),
-                    source_path: None,
-                    preview_data: None,
-                };
-                
-                // Add to data nodes
-                state.add_data_node(table_info.clone());
-                
-                // Also add to canvas to show immediately
-                let node_id = NodeId::new();
-                let canvas_node = crate::state::CanvasNode {
-                    id: node_id,
-                    position: egui::Vec2::new(100.0, 100.0),
-                    size: egui::Vec2::new(600.0, 400.0), // Larger size like Pebble
-                    node_type: crate::state::CanvasNodeType::Table { 
-                        table_info: table_info.clone()
-                    },
-                };
-                state.canvas_nodes.insert(node_id, canvas_node);
-                state.load_data_preview(node_id);
-            }
         });
     }
 }
@@ -280,6 +233,11 @@ impl MenuBar {
             });
             
             ui.menu_button("Data", |ui| {
+                if ui.button("New Query Window").clicked() {
+                    action = Some(MenuAction::NewQuery);
+                    ui.close_menu();
+                }
+                ui.separator();
                 ui.label("Active Data Sources:");
                 ui.separator();
                 if state.data_nodes.is_empty() {
@@ -310,7 +268,7 @@ impl MenuBar {
                 ui.label("Query Validity: ✓ OK");
                 
                 let notes_count = state.canvas_nodes.values()
-                    .filter(|n| matches!(n.node_type, crate::state::CanvasNodeType::Note { .. }))
+                                            .filter(|n| false /* Note nodes disabled */)
                     .count();
                 ui.label(format!("Notes/Annotations: {}", notes_count));
             });
@@ -348,6 +306,7 @@ enum MenuAction {
     NewWorkspace,
     OpenDatabase,
     ImportCsv,
+    NewQuery,
     Save,
     SaveAs,
     Exit,
@@ -384,6 +343,8 @@ pub struct App {
     csv_import_dialog: FileImportDialog,
     // File configuration screen
     file_config_screen: FileConfigScreen,
+    // Mock data initialization flag
+    mock_data_initialized: bool,
 }
 
 impl App {
@@ -416,6 +377,7 @@ impl App {
             app_event_rx,
             csv_import_dialog: FileImportDialog::new(),
             file_config_screen,
+            mock_data_initialized: false,
         }
     }
     
@@ -459,6 +421,20 @@ impl App {
                         // Reset the file config screen to show file picker
                         self.file_config_screen = FileConfigScreen::new();
                         self.state.view_mode = crate::state::ViewMode::FileConfig;
+                    }
+                    MenuAction::NewQuery => {
+                        // Create a new query window
+                        let window_id = NodeId::new();
+                        self.state.query_windows.insert(window_id, QueryWindow {
+                            id: window_id,
+                            title: "New Query".to_string(),
+                            query: "SELECT * FROM ".to_string(),
+                            result: None,
+                            error: None,
+                            page: 0,
+                            page_size: 25,
+                            is_open: true,
+                        });
                     }
                     MenuAction::Save => {
                         println!("💾 Save project");
@@ -539,6 +515,123 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Initialize mock data on first run
+        if self.state.data_nodes.is_empty() && !self.mock_data_initialized {
+            self.mock_data_initialized = true;
+            
+            // Create mock data tables
+            let mock_tables = vec![
+                pika_core::types::TableInfo {
+                    name: "MOCK_DATA_0".to_string(),
+                    columns: vec![
+                        pika_core::types::ColumnInfo {
+                            name: "id".to_string(),
+                            data_type: "INTEGER".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "first_name".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "last_name".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "email".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "gender".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: true,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "ip_address".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: true,
+                        },
+                    ],
+                    row_count: Some(1000),
+                    source_path: None,
+                    preview_data: None,
+                },
+                pika_core::types::TableInfo {
+                    name: "MOCK_DATA_1".to_string(),
+                    columns: vec![
+                        pika_core::types::ColumnInfo {
+                            name: "id".to_string(),
+                            data_type: "INTEGER".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "product_name".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "price".to_string(),
+                            data_type: "REAL".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "quantity".to_string(),
+                            data_type: "INTEGER".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "category".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: true,
+                        },
+                    ],
+                    row_count: Some(500),
+                    source_path: None,
+                    preview_data: None,
+                },
+                pika_core::types::TableInfo {
+                    name: "MOCK_DATA_2".to_string(),
+                    columns: vec![
+                        pika_core::types::ColumnInfo {
+                            name: "id".to_string(),
+                            data_type: "INTEGER".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "timestamp".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "temperature".to_string(),
+                            data_type: "REAL".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "humidity".to_string(),
+                            data_type: "REAL".to_string(),
+                            nullable: false,
+                        },
+                        pika_core::types::ColumnInfo {
+                            name: "location".to_string(),
+                            data_type: "TEXT".to_string(),
+                            nullable: true,
+                        },
+                    ],
+                    row_count: Some(2000),
+                    source_path: None,
+                    preview_data: None,
+                },
+            ];
+            
+            for table in mock_tables {
+                self.state.add_data_node(table);
+            }
+        }
+        
         // Process any pending events
         while let Ok(event) = self.app_event_rx.try_recv() {
             match event {
@@ -605,7 +698,7 @@ impl eframe::App for App {
                 
                 // Central panel - Canvas
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    self.canvas_panel.show(ui, &mut self.state, &self.app_event_tx);
+                    self.canvas_panel.show(ui, &mut self.state, ctx, &self.app_event_tx);
                 });
             }
         }

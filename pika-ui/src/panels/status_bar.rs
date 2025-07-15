@@ -26,12 +26,14 @@ impl StatusBar {
                             crate::state::CanvasNodeType::Plot { plot_type } => {
                                 ui.label(format!("Selected: {} Plot", plot_type));
                             }
+                            /* Note and Shape nodes disabled
                             crate::state::CanvasNodeType::Note { .. } => {
                                 ui.label("Selected: Note");
                             }
                             crate::state::CanvasNodeType::Shape { shape_type } => {
                                 ui.label(format!("Selected: Shape ({:?})", shape_type));
                             }
+                            */
                         }
                     }
                 }
