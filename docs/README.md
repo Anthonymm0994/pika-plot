@@ -5,8 +5,11 @@ Pika-Plot is a data visualization tool that combines the ease of Excalidraw's ca
 
 ## Quick Links
 - **[Multi-Level Overview](OVERVIEW.md)** - Start here! From executive summary to technical deep-dive
-- [Build and Run Instructions](../BUILD_AND_RUN.md)
-- [Available Plot Types](AVAILABLE_PLOT_TYPES.md) - 26 supported visualizations
+- [Getting Started](#getting-started)
+- [Build and Run Instructions](BUILD_AND_RUN.md)
+- [Architecture Overview](ARCHITECTURE_SUMMARY.md)
+- [Available Plot Types](AVAILABLE_PLOT_TYPES.md)
+- [Code Quality Guide](CODE_QUALITY_GUIDE.md)
 - [Project Vision](VISION.md) - Design goals and philosophy
 
 ## Architecture & Implementation
