@@ -18,14 +18,8 @@ pub mod aggregation;
 // pub mod advanced_ml;  // Disabled: requires polars/smartcore
 pub mod spatial_indexing;
 pub mod graph_analysis;
-// pub mod jupyter_integration;  // Disabled: requires jupyter_protocol/evcxr
-// pub mod collaboration;  // Disabled: requires y_octo/loro
 // pub mod automated_insights;  // Disabled: requires polars
-// pub mod predictive_analytics;  // Disabled: requires polars/smartcore
-// pub mod neural_networks;  // Disabled: requires burn
-// pub mod chaos_visualization;  // Disabled: borrow checker issues
 // pub mod advanced_visualization;  // Disabled: requires polars/charming
-// pub mod gpu_acceleration;  // Disabled: requires wgpu
 // pub mod gpu;  // Disabled: requires wgpu
 pub mod error;
 
