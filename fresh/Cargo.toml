@@ -20,6 +20,7 @@ arrow = { version = "=51.0.0", default-features = false, features = ["ipc"] }
 chrono = { version = "=0.4.39", default-features = false }
 tokio = { version = "1.0", features = ["full"] }
 indexmap = "2.10.0"
+rand = "0.9.1"
 
 [profile.release]
 opt-level = 3

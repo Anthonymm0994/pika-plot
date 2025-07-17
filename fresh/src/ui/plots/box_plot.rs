@@ -1,10 +1,381 @@
-use egui::{Ui, Color32, Stroke};
-use egui_plot::{Plot, PlotPoints, Points, Line, Legend, PlotUi};
+use egui::{Ui, Color32, RichText, Stroke};
+use std::ops::Add;
+use egui_plot::{Plot, PlotPoints, Points, Line, Legend, PlotUi, BoxElem, BoxPlot as EguiBoxPlot, BoxSpread};
 use datafusion::arrow::datatypes::DataType;
+use std::collections::{HashMap, HashSet};
 
-use super::{Plot as PlotTrait, PlotData};
+use super::{
+    Plot as PlotTrait, 
+    PlotData, 
+    PlotConfiguration, 
+    PlotSpecificConfig, 
+    BoxPlotConfig, 
+    PlotInteraction,
+    DataSeries,
+    SeriesStyle,
+    data_processor::{DataProcessor, BoxPlotStats}
+};
 
 pub struct BoxPlotImpl;
+
+impl BoxPlotImpl {
+    /// Handle tooltips for box plot
+    fn handle_tooltips(&self, ui: &mut Ui, plot_ui: &PlotUi, data: &PlotData, stats_map: &HashMap<String, BoxPlotStats>) {
+        if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
+            // Find the box plot under the cursor
+            for (group_name, stats) in stats_map {
+                let x_pos = if let Some(point) = data.points.iter().find(|p| p.tooltip_data.get("Group") == Some(group_name)) {
+                    point.x
+                } else {
+                    continue;
+                };
+                
+                let box_width = 0.3;
+                
+                // Check if pointer is within box plot boundaries
+                if pointer_coord.x >= x_pos - box_width/2.0 && pointer_coord.x <= x_pos + box_width/2.0 {
+                    // Check which part of the box plot is being hovered
+                    let tooltip_text = if pointer_coord.y >= stats.q1 && pointer_coord.y <= stats.q3 {
+                        // Box area (IQR)
+                        format!(
+                            "Group: {}\nQ1: {:.2}\nMedian: {:.2}\nQ3: {:.2}\nIQR: {:.2}",
+                            group_name, stats.q1, stats.median, stats.q3, stats.q3 - stats.q1
+                        )
+                    } else if pointer_coord.y >= stats.min && pointer_coord.y <= stats.max {
+                        // Whisker area
+                        format!(
+                            "Group: {}\nMin: {:.2}\nMax: {:.2}\nRange: {:.2}",
+                            group_name, stats.min, stats.max, stats.max - stats.min
+                        )
+                    } else {
+                        // Check if it's an outlier
+                        let mut is_outlier = false;
+                        for &outlier in &stats.outliers {
+                            if (pointer_coord.y - outlier).abs() < 0.2 {
+                                is_outlier = true;
+                                break;
+                            }
+                        }
+                        
+                        if is_outlier {
+                            format!(
+                                "Group: {}\nOutlier: {:.2}\nQ1: {:.2}\nQ3: {:.2}\nIQR: {:.2}",
+                                group_name, pointer_coord.y, stats.q1, stats.q3, stats.q3 - stats.q1
+                            )
+                        } else {
+                            continue;
+                        }
+                    };
+                    
+                    // Tooltip functionality - using a workaround since show_tooltip is not available
+                    if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                        ui.ctx().debug_painter().text(
+                            hover_pos.add(egui::vec2(15.0, 15.0)),
+                            egui::Align2::LEFT_TOP,
+                            &tooltip_text,
+                            egui::TextStyle::Body.resolve(ui.style()),
+                            Color32::WHITE
+                        );
+                    }
+                    
+                    // Highlight the box plot
+                    // self.render_highlighted_box_plot(plot_ui, stats, x_pos, group_name);
+                    
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Render a highlighted box plot
+    fn render_highlighted_box_plot(&self, plot_ui: &PlotUi, stats: &BoxPlotStats, x_pos: f64, name: &str) {
+        let box_width = 0.3;
+        let whisker_width = 0.15;
+        let highlight_color = Color32::from_rgb(150, 200, 255);
+        let median_color = Color32::from_rgb(255, 120, 120);
+        
+        // Box (Q1 to Q3)
+        let box_points = vec![
+            [x_pos - box_width/2.0, stats.q1],
+            [x_pos + box_width/2.0, stats.q1],
+            [x_pos + box_width/2.0, stats.q3],
+            [x_pos - box_width/2.0, stats.q3],
+            [x_pos - box_width/2.0, stats.q1],
+        ];
+        // plot_ui.line(Line::new(PlotPoints::from(box_points))
+        //     .color(highlight_color)
+        //     .width(3.0)
+        //     .name(name));
+        
+        // Median line
+        // plot_ui.line(Line::new(PlotPoints::from(vec![
+        //     [x_pos - box_width/2.0, stats.median],
+        //     [x_pos + box_width/2.0, stats.median],
+        // ])).color(median_color).width(4.0));
+        
+        // Whiskers
+        // Lower whisker
+        // plot_ui.line(Line::new(PlotPoints::from(vec![
+        //     [x_pos, stats.q1],
+        //     [x_pos, stats.min],
+        // ])).color(highlight_color).width(2.0));
+        
+        // plot_ui.line(Line::new(PlotPoints::from(vec![
+        //     [x_pos - whisker_width/2.0, stats.min],
+        //     [x_pos + whisker_width/2.0, stats.min],
+        // ])).color(highlight_color).width(2.0));
+        
+        // Upper whisker
+        // plot_ui.line(Line::new(PlotPoints::from(vec![
+        //     [x_pos, stats.q3],
+        //     [x_pos, stats.max],
+        // ])).color(highlight_color).width(2.0));
+        
+        // plot_ui.line(Line::new(PlotPoints::from(vec![
+        //     [x_pos - whisker_width/2.0, stats.max],
+        //     [x_pos + whisker_width/2.0, stats.max],
+        // ])).color(highlight_color).width(2.0));
+        
+        // Outliers
+        if !stats.outliers.is_empty() {
+            let _outlier_points: PlotPoints = stats.outliers.iter()
+                .map(|&y| [x_pos, y])
+                .collect();
+            // plot_ui.points(Points::new(outlier_points)
+            //     .color(Color32::from_rgb(255, 120, 120))
+            //     .radius(4.0));
+        }
+        
+        // Mean if available
+        if stats.mean > 0.0 {
+            // plot_ui.points(Points::new(vec![[x_pos, stats.mean]])
+            //     .color(Color32::from_rgb(50, 200, 50))
+            //     .shape(egui_plot::MarkerShape::Diamond)
+            //     .radius(5.0));
+        }
+    }
+    
+    /// Process data for box plot with proper grouping
+    async fn process_data(&self, query_result: &crate::core::QueryResult, config: &PlotConfiguration) -> Result<(Vec<DataSeries>, HashMap<String, BoxPlotStats>), String> {
+        let data_processor = DataProcessor::new();
+        
+        // Get box plot specific config
+        let default_config = self.get_default_config();
+        let box_config = if let PlotSpecificConfig::BoxPlot(cfg) = &config.plot_specific {
+            cfg
+        } else {
+            match &default_config.plot_specific {
+                PlotSpecificConfig::BoxPlot(cfg) => cfg,
+                _ => panic!("Expected BoxPlotConfig"),
+            }
+        };
+        
+        // Determine if we're grouping by a column
+        let group_by = if !config.x_column.is_empty() {
+            Some(config.x_column.as_str())
+        } else {
+            None
+        };
+        
+        // Calculate box plot statistics
+        let stats_list = data_processor.compute_box_plot_stats(
+            query_result,
+            &config.y_column,
+            group_by
+        ).await?;
+        
+        // Create a map of group name to stats for tooltips
+        let mut stats_map = HashMap::new();
+        for stats in &stats_list {
+            let group_name = stats.group.clone().unwrap_or_else(|| "All Data".to_string());
+            stats_map.insert(group_name, stats.clone());
+        }
+        
+        // Create series for each group
+        let mut all_series = Vec::new();
+        let colors = super::get_categorical_colors(&config.color_scheme);
+        
+        for (i, stats) in stats_list.iter().enumerate() {
+            let group_name = stats.group.clone().unwrap_or_else(|| "All Data".to_string());
+            let color = colors[i % colors.len()];
+            
+            // X position for this group
+            let x_pos = i as f64;
+            
+            // Create points for the box plot
+            let mut points = Vec::new();
+            
+            // Box (Q1 to Q3)
+            let box_width = 0.3;
+            
+            // Create tooltip data for the box
+            let mut tooltip_data = HashMap::new();
+            tooltip_data.insert("Group".to_string(), group_name.clone());
+            tooltip_data.insert("Min".to_string(), format!("{:.2}", stats.min));
+            tooltip_data.insert("Q1".to_string(), format!("{:.2}", stats.q1));
+            tooltip_data.insert("Median".to_string(), format!("{:.2}", stats.median));
+            tooltip_data.insert("Q3".to_string(), format!("{:.2}", stats.q3));
+            tooltip_data.insert("Max".to_string(), format!("{:.2}", stats.max));
+            tooltip_data.insert("IQR".to_string(), format!("{:.2}", stats.q3 - stats.q1));
+            tooltip_data.insert("Count".to_string(), format!("{}", stats.count));
+            
+            // Add box corners
+            points.push(super::PlotPoint {
+                x: x_pos,
+                y: stats.q1,
+                z: None,
+                label: Some(format!("{} (Q1)", group_name)),
+                color: Some(color),
+                size: None,
+                series_id: Some(group_name.clone()),
+                tooltip_data: tooltip_data.clone(),
+            });
+            
+            points.push(super::PlotPoint {
+                x: x_pos,
+                y: stats.q3,
+                z: None,
+                label: Some(format!("{} (Q3)", group_name)),
+                color: Some(color),
+                size: None,
+                series_id: Some(group_name.clone()),
+                tooltip_data: tooltip_data.clone(),
+            });
+            
+            // Add median
+            points.push(super::PlotPoint {
+                x: x_pos,
+                y: stats.median,
+                z: None,
+                label: Some(format!("{} (Median)", group_name)),
+                color: Some(Color32::from_rgb(255, 100, 100)),
+                size: None,
+                series_id: Some(group_name.clone()),
+                tooltip_data: tooltip_data.clone(),
+            });
+            
+            // Add whiskers
+            points.push(super::PlotPoint {
+                x: x_pos,
+                y: stats.min,
+                z: None,
+                label: Some(format!("{} (Min)", group_name)),
+                color: Some(color),
+                size: None,
+                series_id: Some(group_name.clone()),
+                tooltip_data: tooltip_data.clone(),
+            });
+            
+            points.push(super::PlotPoint {
+                x: x_pos,
+                y: stats.max,
+                z: None,
+                label: Some(format!("{} (Max)", group_name)),
+                color: Some(color),
+                size: None,
+                series_id: Some(group_name.clone()),
+                tooltip_data: tooltip_data.clone(),
+            });
+            
+            // Add outliers
+            for &outlier in &stats.outliers {
+                let mut outlier_tooltip = tooltip_data.clone();
+                outlier_tooltip.insert("Outlier".to_string(), format!("{:.2}", outlier));
+                
+                points.push(super::PlotPoint {
+                    x: x_pos,
+                    y: outlier,
+                    z: None,
+                    label: Some(format!("{} (Outlier)", group_name)),
+                    color: Some(Color32::from_rgb(255, 100, 100)),
+                    size: None,
+                    series_id: Some(group_name.clone()),
+                    tooltip_data: outlier_tooltip,
+                });
+            }
+            
+            // Add mean if showing mean is enabled
+            if box_config.show_mean {
+                let mut mean_tooltip = tooltip_data.clone();
+                mean_tooltip.insert("Mean".to_string(), format!("{:.2}", stats.mean));
+                
+                points.push(super::PlotPoint {
+                    x: x_pos,
+                    y: stats.mean,
+                    z: None,
+                    label: Some(format!("{} (Mean)", group_name)),
+                    color: Some(Color32::from_rgb(50, 200, 50)),
+                    size: None,
+                    series_id: Some(group_name.clone()),
+                    tooltip_data: mean_tooltip,
+                });
+            }
+            
+            // Create series for this group
+            let series = DataSeries {
+                id: group_name.clone(),
+                name: group_name,
+                points,
+                color,
+                visible: true,
+                style: SeriesStyle::Bars { width: box_width as f32 },
+            };
+            
+            all_series.push(series);
+        }
+        
+        Ok((all_series, stats_map))
+    }
+    
+    /// Helper method to get box plot specific config
+    fn as_box_plot_config(config: &PlotConfiguration) -> &BoxPlotConfig {
+        if let PlotSpecificConfig::BoxPlot(cfg) = &config.plot_specific {
+            cfg
+        } else {
+            panic!("Expected BoxPlotConfig")
+        }
+    }
+    
+    /// Render a box plot using egui_plot
+    fn render_box_plot(&self, plot_ui: &mut PlotUi, stats: &BoxPlotStats, x_pos: f64, color: Color32, name: &str, show_outliers: bool, show_mean: bool) {
+        // Create box element
+        let box_elem = BoxElem::new(
+            x_pos,
+            BoxSpread::new(
+                stats.min,
+                stats.q1,
+                stats.median,
+                stats.q3,
+                stats.max,
+            )
+        )
+        .name(name)
+        .box_width(0.3)
+        .whisker_width(0.15)
+        .stroke(Stroke::new(1.5, color));
+        
+        // Add to plot
+        plot_ui.box_plot(EguiBoxPlot::new(vec![box_elem]));
+        
+        // Add outliers if enabled
+        if show_outliers && !stats.outliers.is_empty() {
+            let outlier_points: PlotPoints = stats.outliers.iter()
+                .map(|&y| [x_pos, y])
+                .collect();
+            plot_ui.points(Points::new(outlier_points)
+                .color(Color32::from_rgb(255, 100, 100))
+                .radius(3.0));
+        }
+        
+        // Add mean if enabled
+        if show_mean {
+            plot_ui.points(Points::new(vec![[x_pos, stats.mean]])
+                .color(Color32::from_rgb(50, 200, 50))
+                .shape(egui_plot::MarkerShape::Diamond)
+                .radius(4.0));
+        }
+    }
+}
 
 impl PlotTrait for BoxPlotImpl {
     fn name(&self) -> &'static str {
@@ -29,163 +400,272 @@ impl PlotTrait for BoxPlotImpl {
         ]
     }
     
-    fn render(&self, ui: &mut Ui, data: &PlotData) {
+    fn supports_multiple_series(&self) -> bool {
+        true // For grouped box plots
+    }
+    
+    fn get_default_config(&self) -> PlotConfiguration {
+        let mut config = PlotConfiguration::default();
+        config.plot_specific = PlotSpecificConfig::BoxPlot(BoxPlotConfig {
+            show_outliers: true,
+            show_mean: true,
+            notched: false,
+            violin_overlay: false,
+        });
+        config
+    }
+    
+    fn prepare_data(&self, query_result: &crate::core::QueryResult, config: &PlotConfiguration) -> Result<PlotData, String> {
+        // Use tokio runtime to run async data processing
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        
+        let (series, stats_map) = rt.block_on(self.process_data(query_result, config))?;
+        
+        // Create plot metadata
+        let x_label = if !config.x_column.is_empty() {
+            config.x_column.clone()
+        } else {
+            "Group".to_string()
+        };
+        
+        let metadata = super::PlotMetadata {
+            title: config.title.clone(),
+            x_label,
+            y_label: config.y_column.clone(),
+            show_legend: config.show_legend,
+            show_grid: config.show_grid,
+            color_scheme: config.color_scheme.clone(),
+        };
+        
+        // Flatten points for backward compatibility
+        let points = series.iter().flat_map(|s| s.points.clone()).collect();
+        
+        // Store stats_map in the first point's tooltip_data for later use
+        let mut plot_data = PlotData {
+            points,
+            series,
+            metadata,
+            statistics: None,
+        };
+        
+        // Store stats_map in a special field for tooltips
+        if let Some(first_point) = plot_data.points.first_mut() {
+            first_point.tooltip_data.insert("__stats_map__".to_string(), format!("{:?}", stats_map));
+        }
+        
+        Ok(plot_data)
+    }
+    
+    fn render(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
         if data.points.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label("No data points to display");
+                ui.label(RichText::new("Configure Y column with numeric data").weak());
             });
             return;
         }
         
-        // Calculate box plot statistics
-        let values: Vec<f64> = data.points.iter().map(|p| p.y).collect();
-        let stats = calculate_box_plot_stats(&values);
+        // Get box plot specific config
+        let default_config;
+        let box_config = if let PlotSpecificConfig::BoxPlot(cfg) = &config.plot_specific {
+            cfg
+        } else {
+            default_config = self.get_default_config();
+            default_config.plot_specific.as_box_plot()
+        };
         
+        // Extract stats_map from the first point's tooltip_data
+        let mut stats_map = HashMap::new();
+        if let Some(first_point) = data.points.first() {
+            if let Some(stats_str) = first_point.tooltip_data.get("__stats_map__") {
+                // This is just a placeholder - in a real implementation, we would serialize/deserialize properly
+                // For now, we'll reconstruct the stats from the points
+                
+                // Group points by series_id
+                let mut groups = HashMap::new();
+                for point in &data.points {
+                    if let Some(series_id) = &point.series_id {
+                        groups.entry(series_id.clone()).or_insert_with(Vec::new).push(point);
+                    }
+                }
+                
+                // Extract stats for each group
+                for (group_name, points) in groups {
+                    // Find min, q1, median, q3, max
+                    let mut min = f64::MAX;
+                    let mut q1 = 0.0;
+                    let mut median = 0.0;
+                    let mut q3 = 0.0;
+                    let mut max = f64::MIN;
+                    let mut mean = 0.0;
+                    let mut outliers = Vec::new();
+                    
+                    for point in &points {
+                        if let Some(label) = &point.label {
+                            if label.contains("Min") {
+                                min = point.y;
+                            } else if label.contains("Q1") {
+                                q1 = point.y;
+                            } else if label.contains("Median") {
+                                median = point.y;
+                            } else if label.contains("Q3") {
+                                q3 = point.y;
+                            } else if label.contains("Max") {
+                                max = point.y;
+                            } else if label.contains("Mean") {
+                                mean = point.y;
+                            } else if label.contains("Outlier") {
+                                outliers.push(point.y);
+                            }
+                        }
+                    }
+                    
+                    if min != f64::MAX && max != f64::MIN {
+                        stats_map.insert(group_name.clone(), BoxPlotStats {
+                            group: Some(group_name.clone()),
+                            min,
+                            q1,
+                            median,
+                            q3,
+                            max,
+                            mean,
+                            count: points.len(),
+                            outliers,
+                            lower_fence: q1 - 1.5 * (q3 - q1),
+                            upper_fence: q3 + 1.5 * (q3 - q1),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Create plot
         let plot = Plot::new("box_plot")
-            .x_axis_label(&data.x_label)
-            .y_axis_label(&data.y_label)
-            .show_grid(data.show_grid);
+            .x_axis_label(&data.metadata.x_label)
+            .y_axis_label(&data.metadata.y_label)
+            .show_grid(data.metadata.show_grid)
+            .allow_zoom(config.allow_zoom)
+            .allow_drag(config.allow_pan)
+            .allow_boxed_zoom(config.allow_zoom);
         
-        let plot = if data.show_legend {
+        // Add legend if enabled
+        let plot = if data.metadata.show_legend {
             plot.legend(Legend::default())
         } else {
             plot
         };
         
         plot.show(ui, |plot_ui| {
-            render_box_plot(plot_ui, &stats, 0.0, &data.title);
+            // Render each box plot
+            for (i, series) in data.series.iter().enumerate() {
+                if !series.visible {
+                    continue;
+                }
+                
+                // Find stats for this series
+                if let Some(stats) = stats_map.get(&series.id) {
+                    self.render_box_plot(
+                        plot_ui, 
+                        stats, 
+                        i as f64, 
+                        series.color, 
+                        &series.name,
+                        box_config.show_outliers,
+                        box_config.show_mean
+                    );
+                }
+            }
+            
+            // Handle hover tooltips
+            // Note: Commenting out due to borrow conflict with ui
+            // if config.show_tooltips && !stats_map.is_empty() {
+            //     self.handle_tooltips(ui, plot_ui, data, &stats_map);
+            // }
+            
+            // Add custom x-axis labels for groups
+            if !config.x_column.is_empty() {
+                for (i, series) in data.series.iter().enumerate() {
+                    plot_ui.text(
+                        egui_plot::Text::new(
+                            egui_plot::PlotPoint::new(i as f64, plot_ui.plot_bounds().min()[1] - 0.05 * plot_ui.plot_bounds().height()),
+                            &series.name
+                        )
+                        .color(series.color)
+                        .anchor(egui::Align2::CENTER_TOP)
+                    );
+                }
+            }
         });
-    }
-}
-
-#[derive(Debug)]
-struct BoxPlotStats {
-    min: f64,
-    q1: f64,
-    median: f64,
-    q3: f64,
-    max: f64,
-    outliers: Vec<f64>,
-}
-
-fn calculate_box_plot_stats(values: &[f64]) -> BoxPlotStats {
-    if values.is_empty() {
-        return BoxPlotStats {
-            min: 0.0,
-            q1: 0.0,
-            median: 0.0,
-            q3: 0.0,
-            max: 0.0,
-            outliers: vec![],
-        };
-    }
-    
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    
-    let n = sorted.len();
-    let q1 = percentile(&sorted, 0.25);
-    let median = percentile(&sorted, 0.5);
-    let q3 = percentile(&sorted, 0.75);
-    
-    let iqr = q3 - q1;
-    let lower_fence = q1 - 1.5 * iqr;
-    let upper_fence = q3 + 1.5 * iqr;
-    
-    let mut outliers = Vec::new();
-    let mut min = f64::MAX;
-    let mut max = f64::MIN;
-    
-    for &value in &sorted {
-        if value < lower_fence || value > upper_fence {
-            outliers.push(value);
-        } else {
-            min = min.min(value);
-            max = max.max(value);
+        
+        // Show statistics if available
+        if !stats_map.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Groups:");
+                ui.label(format!("{}", stats_map.len()));
+                
+                if stats_map.len() == 1 {
+                    if let Some(stats) = stats_map.values().next() {
+                        ui.separator();
+                        ui.label("Median:");
+                        ui.label(format!("{:.3}", stats.median));
+                        
+                        ui.separator();
+                        ui.label("IQR:");
+                        ui.label(format!("{:.3}", stats.q3 - stats.q1));
+                        
+                        ui.separator();
+                        ui.label(format!("Count: {}", stats.count));
+                    }
+                }
+            });
         }
     }
     
-    BoxPlotStats {
-        min,
-        q1,
-        median,
-        q3,
-        max,
-        outliers,
+    fn render_legend(&self, ui: &mut Ui, data: &PlotData, _config: &PlotConfiguration) {
+        if !data.series.is_empty() {
+            ui.group(|ui| {
+                ui.label(RichText::new("Groups:").strong());
+                ui.separator();
+                
+                for series in &data.series {
+                    if series.visible {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(series.color, "■");
+                            ui.label(&series.name);
+                        });
+                    }
+                }
+                
+                // Add legend for special elements
+                ui.separator();
+                ui.label(RichText::new("Elements:").strong());
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::from_rgb(50, 200, 50), "◆");
+                    ui.label("Mean");
+                });
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::from_rgb(255, 100, 100), "●");
+                    ui.label("Outliers");
+                });
+            });
+        }
+    }
+    
+    fn handle_interaction(&self, _ui: &mut Ui, _data: &PlotData, _config: &PlotConfiguration) -> Option<PlotInteraction> {
+        None
     }
 }
 
-fn percentile(sorted_values: &[f64], p: f64) -> f64 {
-    if sorted_values.is_empty() {
-        return 0.0;
-    }
-    
-    let n = sorted_values.len();
-    let index = p * (n - 1) as f64;
-    let lower = index.floor() as usize;
-    let upper = index.ceil() as usize;
-    
-    if lower == upper {
-        sorted_values[lower]
-    } else {
-        let weight = index - lower as f64;
-        sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
-    }
+// Extension trait for PlotSpecificConfig
+trait AsBoxPlot {
+    fn as_box_plot(&self) -> &BoxPlotConfig;
 }
 
-fn render_box_plot(plot_ui: &mut PlotUi, stats: &BoxPlotStats, x_pos: f64, name: &str) {
-    let box_width = 0.3;
-    let whisker_width = 0.15;
-    
-    // Box (Q1 to Q3)
-    let box_points = vec![
-        [x_pos - box_width/2.0, stats.q1],
-        [x_pos + box_width/2.0, stats.q1],
-        [x_pos + box_width/2.0, stats.q3],
-        [x_pos - box_width/2.0, stats.q3],
-        [x_pos - box_width/2.0, stats.q1],
-    ];
-    plot_ui.line(Line::new(PlotPoints::from(box_points))
-        .color(Color32::from_rgb(100, 150, 250))
-        .width(2.0)
-        .name(name));
-    
-    // Median line
-    plot_ui.line(Line::new(PlotPoints::from(vec![
-        [x_pos - box_width/2.0, stats.median],
-        [x_pos + box_width/2.0, stats.median],
-    ])).color(Color32::from_rgb(250, 100, 100)).width(3.0));
-    
-    // Whiskers
-    // Lower whisker
-    plot_ui.line(Line::new(PlotPoints::from(vec![
-        [x_pos, stats.q1],
-        [x_pos, stats.min],
-    ])).color(Color32::from_rgb(100, 150, 250)).width(1.0));
-    
-    plot_ui.line(Line::new(PlotPoints::from(vec![
-        [x_pos - whisker_width/2.0, stats.min],
-        [x_pos + whisker_width/2.0, stats.min],
-    ])).color(Color32::from_rgb(100, 150, 250)).width(1.0));
-    
-    // Upper whisker
-    plot_ui.line(Line::new(PlotPoints::from(vec![
-        [x_pos, stats.q3],
-        [x_pos, stats.max],
-    ])).color(Color32::from_rgb(100, 150, 250)).width(1.0));
-    
-    plot_ui.line(Line::new(PlotPoints::from(vec![
-        [x_pos - whisker_width/2.0, stats.max],
-        [x_pos + whisker_width/2.0, stats.max],
-    ])).color(Color32::from_rgb(100, 150, 250)).width(1.0));
-    
-    // Outliers
-    if !stats.outliers.is_empty() {
-        let outlier_points: PlotPoints = stats.outliers.iter()
-            .map(|&y| [x_pos, y])
-            .collect();
-        plot_ui.points(Points::new(outlier_points)
-            .color(Color32::from_rgb(250, 100, 100))
-            .radius(3.0));
+impl AsBoxPlot for PlotSpecificConfig {
+    fn as_box_plot(&self) -> &BoxPlotConfig {
+        match self {
+            PlotSpecificConfig::BoxPlot(cfg) => cfg,
+            _ => panic!("Expected BoxPlotConfig"),
+        }
     }
-} 
+}

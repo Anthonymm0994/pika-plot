@@ -245,13 +245,21 @@ impl PlotWindow {
         
         let points = self.extract_plot_points(data)?;
         
-        Ok(PlotData {
-            points,
+        // Create metadata
+        let metadata = plots::PlotMetadata {
             title: self.config.title.clone(),
             x_label: self.config.x_column.clone(),
             y_label: self.config.y_column.clone(),
             show_legend: self.config.show_legend,
             show_grid: self.config.show_grid,
+            color_scheme: plots::ColorScheme::default(),
+        };
+        
+        Ok(PlotData {
+            points,
+            series: vec![],
+            metadata,
+            statistics: None,
         })
     }
     
@@ -286,12 +294,20 @@ impl PlotWindow {
                     row_idx as f64
                 };
                 
+                // Create tooltip data
+                let mut tooltip_data = std::collections::HashMap::new();
+                tooltip_data.insert("X".to_string(), x_val.to_string());
+                tooltip_data.insert("Y".to_string(), y_val.to_string());
+                
                 points.push(PlotPoint {
                     x: x_val,
                     y: y_val,
+                    z: None,
                     label: None,
                     color: None,
                     size: None,
+                    series_id: None,
+                    tooltip_data,
                 });
             }
         }
@@ -302,33 +318,54 @@ impl PlotWindow {
     fn render_plot(&self, ui: &mut Ui, plot_type: &PlotType, plot_data: PlotData) {
         use PlotType::*;
         
+        // Create a plot configuration from the current settings
+        let plot_config = plots::PlotConfiguration {
+            title: self.config.title.clone(),
+            x_column: self.config.x_column.clone(),
+            y_column: self.config.y_column.clone(),
+            color_column: None,
+            size_column: None,
+            group_column: None,
+            show_legend: self.config.show_legend,
+            show_grid: self.config.show_grid,
+            show_axes_labels: true,
+            color_scheme: plots::ColorScheme::default(),
+            marker_size: 4.0,
+            line_width: 2.0,
+            allow_zoom: true,
+            allow_pan: true,
+            allow_selection: true,
+            show_tooltips: true,
+            plot_specific: plots::PlotSpecificConfig::None,
+        };
+        
         match plot_type {
-            BarChart => plots::BarChartPlot.render(ui, &plot_data),
-            LineChart => plots::LineChartPlot.render(ui, &plot_data),
-            ScatterPlot => plots::ScatterPlotImpl.render(ui, &plot_data),
-            Histogram => plots::HistogramPlot.render(ui, &plot_data),
-            BoxPlot => plots::BoxPlotImpl.render(ui, &plot_data),
+            BarChart => plots::BarChartPlot.render(ui, &plot_data, &plot_config),
+            LineChart => plots::LineChartPlot.render(ui, &plot_data, &plot_config),
+            ScatterPlot => plots::ScatterPlotImpl.render(ui, &plot_data, &plot_config),
+            Histogram => plots::HistogramPlot.render(ui, &plot_data, &plot_config),
+            BoxPlot => plots::BoxPlotImpl.render(ui, &plot_data, &plot_config),
             
             // These will show "coming soon" messages for now
-            HeatMap => plots::heatmap::HeatmapPlot.render(ui, &plot_data),
-            ViolinPlot => plots::violin::ViolinPlot.render(ui, &plot_data),
-            AnomalyDetection => plots::anomaly::AnomalyPlot.render(ui, &plot_data),
-            CorrelationMatrix => plots::correlation::CorrelationPlot.render(ui, &plot_data),
-            DistributionPlot => plots::distribution::DistributionPlot.render(ui, &plot_data),
-            Scatter3D => plots::scatter3d::Scatter3dPlot.render(ui, &plot_data),
-            Surface3D => plots::surface3d::Surface3dPlot.render(ui, &plot_data),
-            ContourPlot => plots::contour::ContourPlot.render(ui, &plot_data),
-            ParallelCoordinates => plots::parallel_coordinates::ParallelCoordinatesPlot.render(ui, &plot_data),
-            RadarChart => plots::radar::RadarPlot.render(ui, &plot_data),
-            SankeyDiagram => plots::sankey::SankeyPlot.render(ui, &plot_data),
-            Treemap => plots::treemap::TreemapPlot.render(ui, &plot_data),
-            SunburstChart => plots::sunburst::SunburstPlot.render(ui, &plot_data),
-            NetworkGraph => plots::network::NetworkPlot.render(ui, &plot_data),
-            GeoPlot => plots::geo::GeoPlot.render(ui, &plot_data),
-            TimeAnalysis => plots::time_analysis::TimeAnalysisPlot.render(ui, &plot_data),
-            CandlestickChart => plots::candlestick::CandlestickPlot.render(ui, &plot_data),
-            StreamGraph => plots::stream::StreamPlot.render(ui, &plot_data),
-            PolarPlot => plots::polar::PolarPlot.render(ui, &plot_data),
+            HeatMap => plots::heatmap::HeatmapPlot.render(ui, &plot_data, &plot_config),
+            ViolinPlot => plots::violin::ViolinPlot.render(ui, &plot_data, &plot_config),
+            AnomalyDetection => plots::anomaly::AnomalyPlot.render(ui, &plot_data, &plot_config),
+            CorrelationMatrix => plots::correlation::CorrelationPlot.render(ui, &plot_data, &plot_config),
+            DistributionPlot => plots::distribution::DistributionPlot.render(ui, &plot_data, &plot_config),
+            Scatter3D => plots::scatter3d::Scatter3dPlot.render(ui, &plot_data, &plot_config),
+            Surface3D => plots::surface3d::Surface3dPlot.render(ui, &plot_data, &plot_config),
+            ContourPlot => plots::contour::ContourPlot.render(ui, &plot_data, &plot_config),
+            ParallelCoordinates => plots::parallel_coordinates::ParallelCoordinatesPlot.render(ui, &plot_data, &plot_config),
+            RadarChart => plots::radar::RadarPlot.render(ui, &plot_data, &plot_config),
+            SankeyDiagram => plots::sankey::SankeyPlot.render(ui, &plot_data, &plot_config),
+            Treemap => plots::treemap::TreemapPlot.render(ui, &plot_data, &plot_config),
+            SunburstChart => plots::sunburst::SunburstPlot.render(ui, &plot_data, &plot_config),
+            NetworkGraph => plots::network::NetworkPlot.render(ui, &plot_data, &plot_config),
+            GeoPlot => plots::geo::GeoPlot.render(ui, &plot_data, &plot_config),
+            TimeAnalysis => plots::time_analysis::TimeAnalysisPlot.render(ui, &plot_data, &plot_config),
+            CandlestickChart => plots::candlestick::CandlestickPlot.render(ui, &plot_data, &plot_config),
+            StreamGraph => plots::stream::StreamPlot.render(ui, &plot_data, &plot_config),
+            PolarPlot => plots::polar::PolarPlot.render(ui, &plot_data, &plot_config),
         }
     }
 }

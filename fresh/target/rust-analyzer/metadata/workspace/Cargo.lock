@@ -2383,6 +2383,7 @@ dependencies = [
  "egui_plot",
  "image",
  "indexmap",
+ "rand 0.9.1",
  "rfd",
  "serde",
  "serde_json",
