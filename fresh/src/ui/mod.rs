@@ -7,6 +7,7 @@ mod home_screen;
 mod plot_window;
 mod multi_csv_import;
 mod export_dialog;
+mod gpu_renderer;
 pub mod plots;
 
 pub use sidebar::Sidebar;
@@ -18,4 +19,5 @@ pub use file_config::FileConfigDialog;
 pub use theme::apply_theme;
 pub use home_screen::HomeScreen;
 pub use multi_csv_import::MultiCsvImportDialog;
-pub use export_dialog::{ExportDialog, ExportFormat}; 
+pub use export_dialog::{ExportDialog, ExportFormat};
+pub use gpu_renderer::{GpuPlotRenderer, RenderMode, GpuRenderer, GpuCapabilities}; 

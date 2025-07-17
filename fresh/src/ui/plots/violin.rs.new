@@ -434,7 +434,7 @@ impl PlotTrait for ViolinPlot {
         
         // If we have multiple series (groups), process each one
         if data.series.len() > 1 {
-            for (_i, series) in data.series.iter().enumerate() {
+            for (i, series) in data.series.iter().enumerate() {
                 if !series.visible {
                     continue;
                 }
@@ -885,7 +885,10 @@ impl PlotTrait for ViolinPlot {
         }
     }
     
-    fn handle_interaction(&self, _ui: &mut Ui, _data: &PlotData, _config: &PlotConfiguration) -> Option<PlotInteraction> {
+    fn handle_interaction(&self, _ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) -> Option<PlotInteraction> {
+        // Enhanced interaction handling for violin plots
+        // This could be extended in the future to support selection of specific distribution regions
+        // or interactive bandwidth adjustment
         None
     }
 }

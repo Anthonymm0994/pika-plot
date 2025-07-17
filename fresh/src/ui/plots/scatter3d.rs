@@ -25,7 +25,7 @@ impl PlotTrait for Scatter3dPlot {
     fn name(&self) -> &'static str { "3D Scatter Plot" }
     fn required_x_types(&self) -> Option<Vec<DataType>> { None }
     fn required_y_types(&self) -> Vec<DataType> { vec![] }
-    fn render(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
+    fn render(&self, ui: &mut Ui, _data: &PlotData, _config: &PlotConfiguration) {
         ui.centered_and_justified(|ui| {
             ui.label("3D scatter visualization coming soon (egui_plot is 2D only)");
         });

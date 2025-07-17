@@ -15,7 +15,7 @@ pub enum HomeAction {
     CreateProject,
 }
 
-pub struct FreshApp {
+pub struct FreshApp<'a> {
     mode: AppMode,
     database: Option<Arc<Database>>,
     database_path: Option<std::path::PathBuf>,
@@ -24,14 +24,14 @@ pub struct FreshApp {
     sidebar: Sidebar,
     home_screen: HomeScreen,
     query_windows: Vec<QueryWindow>,
-    plot_windows: Vec<PlotWindow>,
+    plot_windows: Vec<PlotWindow<'a>>,
     csv_import_dialog: Option<CsvImportDialog>,
     file_config_dialog: FileConfigDialog,
     next_window_id: usize,
     error: Option<String>,
 }
 
-impl FreshApp {
+impl<'a> FreshApp<'a> {
     pub fn new() -> Self {
         Self {
             mode: AppMode::Viewer,
@@ -320,10 +320,16 @@ impl FreshApp {
         self.next_window_id += 1;
         
         let title = format!("Plot {}", window_id);
-        let plot_window = PlotWindow::new(window_id.to_string(), title);
+        let mut plot_window = PlotWindow::new(window_id.to_string(), title);
+        
+        // Initialize GPU renderer if available
+        if plot_window.config.use_gpu_rendering {
+            // Note: This is async but we're calling it synchronously for now
+            // In a real app, you'd want to handle this properly with async/await
+            pollster::block_on(plot_window.initialize_gpu_renderer());
+        }
         
         // Set the initial data
-        let mut plot_window = plot_window;
         plot_window.update_data(data);
         
         self.plot_windows.push(plot_window);

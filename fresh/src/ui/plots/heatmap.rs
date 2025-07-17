@@ -8,18 +8,24 @@ use super::{
     Plot as PlotTrait, 
     PlotData, 
     PlotConfiguration, 
-    PlotInteraction,
+    PlotSpecificConfig, 
+    ColorScheme,
     DataSeries,
     SeriesStyle,
-    ColorScheme,
-    SequentialScheme
+    PlotMetadata,
+    DataStatistics,
+    PlotInteraction,
+    // Enhanced utilities
+    categorical_color, viridis_color, plasma_color, diverging_color,
+    calculate_statistics, extract_numeric_values, extract_string_values,
+    get_categorical_colors
 };
 
 pub struct HeatmapPlot;
 
 impl HeatmapPlot {
     /// Handle tooltips for heatmap
-    fn handle_tooltips(&self, ui: &mut Ui, plot_ui: &mut PlotUi, data: &PlotData, matrix: &[Vec<f64>], row_labels: &[String], col_labels: &[String]) {
+    fn handle_tooltips(&self, ui: &mut Ui, plot_ui: &mut PlotUi, _data: &PlotData, matrix: &[Vec<f64>], row_labels: &[String], col_labels: &[String]) {
         if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
             // Find the cell under the cursor
             let x = pointer_coord.x.round() as usize;
@@ -29,7 +35,7 @@ impl HeatmapPlot {
                 if let Some(row) = matrix.get(y) {
                     if let Some(&value) = row.get(x) {
                         // Show tooltip with cell data
-                        let tooltip_text = format!(
+                        let _tooltip_text = format!(
                             "Row: {}\nColumn: {}\nValue: {:.3}",
                             row_labels[y], col_labels[x], value
                         );
@@ -142,34 +148,25 @@ impl HeatmapPlot {
         };
         
         match color_scheme {
-            ColorScheme::Default => {
+            ColorScheme::Viridis => {
+                // Use viridis color scheme
+                let colors = color_scheme.get_colors(256);
+                let idx = (normalized * 255.0).round() as usize;
+                colors[idx.min(255)]
+            },
+            ColorScheme::Plasma => {
+                // Use plasma color scheme
+                let colors = color_scheme.get_colors(256);
+                let idx = (normalized * 255.0).round() as usize;
+                colors[idx.min(255)]
+            },
+            _ => {
                 // Default heatmap colors (blue to red)
                 let r = (normalized * 255.0) as u8;
                 let b = ((1.0 - normalized) * 255.0) as u8;
                 let g = 0;
                 Color32::from_rgb(r, g, b)
-            },
-            ColorScheme::Sequential(scheme) => {
-                // Get colors for sequential scheme
-                let colors = super::get_sequential_colors(scheme, 10);
-                let idx = (normalized * 9.0).round() as usize;
-                colors[idx.min(9)]
-            },
-            ColorScheme::Diverging(scheme) => {
-                // Get colors for diverging scheme (centered at 0.5)
-                let colors = super::get_diverging_colors(scheme, 11);
-                let idx = (normalized * 10.0).round() as usize;
-                colors[idx.min(10)]
-            },
-            ColorScheme::Categorical(colors) => {
-                // Use categorical colors for discrete values
-                let idx = (normalized * (colors.len() - 1) as f64).round() as usize;
-                colors[idx.min(colors.len() - 1)]
-            },
-            ColorScheme::Custom(map) => {
-                // Use first color from custom map or default
-                map.values().next().copied().unwrap_or(Color32::from_rgb(100, 100, 255))
-            },
+            }
         }
     }
     
@@ -254,7 +251,7 @@ impl PlotTrait for HeatmapPlot {
     
     fn get_default_config(&self) -> PlotConfiguration {
         let mut config = PlotConfiguration::default();
-        config.color_scheme = ColorScheme::Sequential(SequentialScheme::Viridis);
+        config.color_scheme = ColorScheme::Viridis;
         config
     }
     
@@ -550,7 +547,7 @@ impl PlotTrait for HeatmapPlot {
         self.render_color_legend(ui, min_val, max_val, &data.metadata.color_scheme);
     }
     
-    fn render_legend(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
+    fn render_legend(&self, ui: &mut Ui, data: &PlotData, _config: &PlotConfiguration) {
         // Extract min/max values
         let mut min_val = 0.0;
         let mut max_val = 1.0;

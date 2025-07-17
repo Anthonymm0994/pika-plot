@@ -4,9 +4,10 @@
 //! with proper column type validation using DataFusion's type system.
 
 use datafusion::arrow::datatypes::DataType;
-use egui::{Ui, Color32};
+use egui::{Ui, Color32, RichText};
 use crate::core::QueryResult;
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
 // Import all plot modules
 pub mod bar;
@@ -36,6 +37,16 @@ pub mod polar;
 
 // DataFusion integration layer
 pub mod data_processor;
+
+// Enhanced utilities based on frog-viz patterns
+pub mod utils;
+pub mod enhanced_config;
+
+// Re-export enhanced utilities
+pub use utils::{categorical_color, viridis_color, plasma_color, diverging_color};
+pub use utils::{calculate_quartiles, detect_outliers_iqr, zscore_outliers, calculate_statistics};
+pub use utils::{extract_numeric_values, extract_string_values, extract_temporal_values};
+pub use enhanced_config::{EnhancedPlotConfig, ColorScheme};
 
 // Enhanced Plot trait with advanced functionality
 pub trait Plot {
@@ -67,7 +78,25 @@ pub trait Plot {
     
     /// Get default configuration for this plot type
     fn get_default_config(&self) -> PlotConfiguration {
-        PlotConfiguration::default()
+        PlotConfiguration {
+            title: String::new(),
+            x_column: String::new(),
+            y_column: String::new(),
+            color_column: None,
+            size_column: None,
+            group_column: None,
+            show_legend: true,
+            show_grid: true,
+            show_axes_labels: true,
+            color_scheme: ColorScheme::Viridis,
+            marker_size: 4.0,
+            line_width: 2.0,
+            allow_zoom: true,
+            allow_pan: true,
+            allow_selection: true,
+            show_tooltips: true,
+            plot_specific: PlotSpecificConfig::None,
+        }
     }
     
     /// Validate if the selected columns are appropriate for this plot type
@@ -124,15 +153,69 @@ pub trait Plot {
     fn render(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration);
     
     /// Render legend for the plot
-    fn render_legend(&self, ui: &mut Ui, data: &PlotData, _config: &PlotConfiguration) {
-        if !data.series.is_empty() {
+    fn render_legend(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
+        if !data.series.is_empty() && config.show_legend {
             ui.group(|ui| {
-                ui.label("Legend:");
+                ui.label(RichText::new("Series:").strong());
+                ui.separator();
+                
                 for series in &data.series {
-                    if series.visible {
-                        ui.horizontal(|ui| {
-                            ui.colored_label(series.color, "●");
+                    let mut is_visible = series.visible;
+                    if ui.checkbox(&mut is_visible, &series.name).changed() {
+                        // Note: This would require mutable access to data, which we don't have here
+                        // The actual visibility toggle should be handled in handle_interaction
+                    }
+                    
+                    // Show series style indicator
+                    ui.horizontal(|ui| {
+                        match series.style {
+                            SeriesStyle::Line { width: _, dashed } => {
+                                let style_text = if dashed { "---" } else { "———" };
+                                ui.colored_label(series.color, style_text);
+                            },
+                            SeriesStyle::Points { size: _, shape } => {
+                                let shape_text = match shape {
+                                    MarkerShape::Circle => "●",
+                                    MarkerShape::Square => "■",
+                                    MarkerShape::Diamond => "◆",
+                                    MarkerShape::Triangle => "▲",
+                                    MarkerShape::Cross => "✚",
+                                    MarkerShape::Plus => "➕",
+                                };
+                                ui.colored_label(series.color, shape_text);
+                            },
+                            SeriesStyle::Bars { width: _ } => {
+                                ui.colored_label(series.color, "■");
+                            },
+                            SeriesStyle::Area { alpha: _ } => {
+                                ui.colored_label(series.color, "▬");
+                            },
+                        }
+                        
+                        if !is_visible {
+                            ui.label(RichText::new(&series.name).strikethrough());
+                        } else {
                             ui.label(&series.name);
+                        }
+                    });
+                }
+                
+                // Show statistics if available
+                if let Some(stats) = &data.statistics {
+                    ui.separator();
+                    ui.label(RichText::new("Statistics:").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Count:");
+                        ui.label(format!("{}", stats.count));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Mean Y:");
+                        ui.label(format!("{:.3}", stats.mean_y));
+                    });
+                    if let Some(corr) = stats.correlation {
+                        ui.horizontal(|ui| {
+                            ui.label("Correlation:");
+                            ui.label(format!("{:.3}", corr));
                         });
                     }
                 }
@@ -261,7 +344,7 @@ impl Default for PlotConfiguration {
             show_legend: true,
             show_grid: true,
             show_axes_labels: true,
-            color_scheme: ColorScheme::Default,
+            color_scheme: ColorScheme::Viridis,
             marker_size: 4.0,
             line_width: 2.0,
             allow_zoom: true,
@@ -282,6 +365,7 @@ pub enum PlotSpecificConfig {
     ScatterPlot(ScatterPlotConfig),
     Histogram(HistogramConfig),
     BoxPlot(BoxPlotConfig),
+    Violin(ViolinPlotConfig),
 }
 
 impl PlotSpecificConfig {
@@ -319,6 +403,13 @@ impl PlotSpecificConfig {
             _ => panic!("Expected BoxPlotConfig"),
         }
     }
+    
+    pub fn as_violin(&self) -> &ViolinPlotConfig {
+        match self {
+            PlotSpecificConfig::Violin(config) => config,
+            _ => panic!("Expected ViolinPlotConfig"),
+        }
+    }
 }
 
 /// Bar chart specific configuration
@@ -330,6 +421,17 @@ pub struct BarChartConfig {
     pub sort_order: SortOrder,
 }
 
+impl Default for BarChartConfig {
+    fn default() -> Self {
+        Self {
+            bar_width: 0.8,
+            group_spacing: 0.2,
+            stacking_mode: StackingMode::None,
+            sort_order: SortOrder::None,
+        }
+    }
+}
+
 /// Line chart specific configuration
 #[derive(Debug, Clone)]
 pub struct LineChartConfig {
@@ -337,6 +439,17 @@ pub struct LineChartConfig {
     pub show_points: bool,
     pub smooth_lines: bool,
     pub fill_area: bool,
+}
+
+impl Default for LineChartConfig {
+    fn default() -> Self {
+        Self {
+            line_style: LineStyle::Solid,
+            show_points: true,
+            smooth_lines: false,
+            fill_area: false,
+        }
+    }
 }
 
 /// Scatter plot specific configuration
@@ -348,6 +461,17 @@ pub struct ScatterPlotConfig {
     pub jitter_amount: f32,
 }
 
+impl Default for ScatterPlotConfig {
+    fn default() -> Self {
+        Self {
+            point_shape: MarkerShape::Circle,
+            show_trend_line: false,
+            show_density: false,
+            jitter_amount: 0.0,
+        }
+    }
+}
+
 /// Histogram specific configuration
 #[derive(Debug, Clone)]
 pub struct HistogramConfig {
@@ -357,6 +481,17 @@ pub struct HistogramConfig {
     pub show_normal_curve: bool,
 }
 
+impl Default for HistogramConfig {
+    fn default() -> Self {
+        Self {
+            bin_count: None,
+            bin_width: None,
+            show_density: false,
+            show_normal_curve: false,
+        }
+    }
+}
+
 /// Box plot specific configuration
 #[derive(Debug, Clone)]
 pub struct BoxPlotConfig {
@@ -364,6 +499,17 @@ pub struct BoxPlotConfig {
     pub show_mean: bool,
     pub notched: bool,
     pub violin_overlay: bool,
+}
+
+impl Default for BoxPlotConfig {
+    fn default() -> Self {
+        Self {
+            show_outliers: true,
+            show_mean: false,
+            notched: false,
+            violin_overlay: false,
+        }
+    }
 }
 
 /// Stacking modes for bar charts
@@ -390,53 +536,6 @@ pub enum LineStyle {
     Dashed,
     Dotted,
     DashDot,
-}
-
-/// Color schemes for plots with beautiful, accessible colors
-#[derive(Debug, Clone)]
-pub enum ColorScheme {
-    Default,
-    Categorical(Vec<Color32>),
-    Sequential(SequentialScheme),
-    Diverging(DivergingScheme),
-    Custom(HashMap<String, Color32>),
-}
-
-impl Default for ColorScheme {
-    fn default() -> Self {
-        // Use a beautiful, accessible categorical color palette
-        ColorScheme::Categorical(vec![
-            Color32::from_rgb(31, 119, 180),   // Blue
-            Color32::from_rgb(255, 127, 14),   // Orange
-            Color32::from_rgb(44, 160, 44),    // Green
-            Color32::from_rgb(214, 39, 40),    // Red
-            Color32::from_rgb(148, 103, 189),  // Purple
-            Color32::from_rgb(140, 86, 75),    // Brown
-            Color32::from_rgb(227, 119, 194),  // Pink
-            Color32::from_rgb(127, 127, 127),  // Gray
-            Color32::from_rgb(188, 189, 34),   // Olive
-            Color32::from_rgb(23, 190, 207),   // Cyan
-        ])
-    }
-}
-
-/// Sequential color schemes for continuous data
-#[derive(Debug, Clone)]
-pub enum SequentialScheme {
-    Blues,
-    Greens,
-    Reds,
-    Viridis,
-    Plasma,
-}
-
-/// Diverging color schemes for data with a meaningful center
-#[derive(Debug, Clone)]
-pub enum DivergingScheme {
-    RdBu,
-    RdYlBu,
-    Spectral,
-    Coolwarm,
 }
 
 /// Plot interaction events
@@ -614,6 +713,43 @@ impl PlotType {
                 PlotType::PolarPlot,
             ]),
         ]
+    }
+    
+    /// Get required column types for X axis (None means no X column required)
+    pub fn required_x_types(&self) -> Option<Vec<DataType>> {
+        match self {
+            // Plots that require X column
+            PlotType::BarChart | PlotType::LineChart | PlotType::ScatterPlot | 
+            PlotType::Scatter3D | PlotType::Surface3D | PlotType::ContourPlot |
+            PlotType::TimeAnalysis | PlotType::CandlestickChart => {
+                Some(vec![DataType::Utf8, DataType::Int64, DataType::Float64])
+            }
+            
+            // Plots that don't require X column
+            PlotType::Histogram | PlotType::BoxPlot | PlotType::ViolinPlot |
+            PlotType::HeatMap | PlotType::CorrelationMatrix | PlotType::DistributionPlot |
+            PlotType::AnomalyDetection => None,
+            
+            // Default: require X column
+            _ => Some(vec![DataType::Utf8, DataType::Int64, DataType::Float64]),
+        }
+    }
+    
+    /// Get required column types for Y axis
+    pub fn required_y_types(&self) -> Vec<DataType> {
+        match self {
+            // Plots that require numeric Y
+            PlotType::BarChart | PlotType::LineChart | PlotType::ScatterPlot |
+            PlotType::Histogram | PlotType::BoxPlot | PlotType::ViolinPlot |
+            PlotType::HeatMap | PlotType::CorrelationMatrix | PlotType::DistributionPlot |
+            PlotType::AnomalyDetection | PlotType::Scatter3D | PlotType::Surface3D |
+            PlotType::ContourPlot => {
+                vec![DataType::Int64, DataType::Float64]
+            }
+            
+            // Default: allow any type
+            _ => vec![DataType::Utf8, DataType::Int64, DataType::Float64],
+        }
     }
     
     /// Check if this plot type supports the given column types
@@ -798,163 +934,7 @@ pub fn extract_plot_points(query_result: &QueryResult, config: &PlotConfiguratio
 
 /// Get categorical colors from color scheme
 pub fn get_categorical_colors(scheme: &ColorScheme) -> Vec<Color32> {
-    match scheme {
-        ColorScheme::Default => {
-            // Default beautiful, accessible color palette
-            vec![
-                Color32::from_rgb(31, 119, 180),   // Blue
-                Color32::from_rgb(255, 127, 14),   // Orange
-                Color32::from_rgb(44, 160, 44),    // Green
-                Color32::from_rgb(214, 39, 40),    // Red
-                Color32::from_rgb(148, 103, 189),  // Purple
-                Color32::from_rgb(140, 86, 75),    // Brown
-                Color32::from_rgb(227, 119, 194),  // Pink
-                Color32::from_rgb(127, 127, 127),  // Gray
-                Color32::from_rgb(188, 189, 34),   // Olive
-                Color32::from_rgb(23, 190, 207),   // Cyan
-            ]
-        },
-        ColorScheme::Categorical(colors) => {
-            colors.clone()
-        }
-        ColorScheme::Sequential(scheme) => get_sequential_colors(scheme, 10),
-        ColorScheme::Diverging(scheme) => get_diverging_colors(scheme, 10),
-        ColorScheme::Custom(map) => map.values().cloned().collect(),
-    }
-}
-
-/// Generate sequential color scheme
-pub fn get_sequential_colors(scheme: &SequentialScheme, count: usize) -> Vec<Color32> {
-    match scheme {
-        SequentialScheme::Blues => generate_color_gradient(
-            Color32::from_rgb(247, 251, 255),
-            Color32::from_rgb(8, 48, 107),
-            count
-        ),
-        SequentialScheme::Greens => generate_color_gradient(
-            Color32::from_rgb(247, 252, 245),
-            Color32::from_rgb(0, 68, 27),
-            count
-        ),
-        SequentialScheme::Reds => generate_color_gradient(
-            Color32::from_rgb(255, 245, 240),
-            Color32::from_rgb(103, 0, 13),
-            count
-        ),
-        SequentialScheme::Viridis => vec![
-            Color32::from_rgb(68, 1, 84),
-            Color32::from_rgb(72, 40, 120),
-            Color32::from_rgb(62, 74, 137),
-            Color32::from_rgb(49, 104, 142),
-            Color32::from_rgb(38, 130, 142),
-            Color32::from_rgb(31, 158, 137),
-            Color32::from_rgb(53, 183, 121),
-            Color32::from_rgb(109, 205, 89),
-            Color32::from_rgb(180, 222, 44),
-            Color32::from_rgb(253, 231, 37),
-        ][..count.min(10)].to_vec(),
-        SequentialScheme::Plasma => vec![
-            Color32::from_rgb(13, 8, 135),
-            Color32::from_rgb(75, 3, 161),
-            Color32::from_rgb(125, 3, 168),
-            Color32::from_rgb(168, 34, 150),
-            Color32::from_rgb(203, 70, 121),
-            Color32::from_rgb(229, 107, 93),
-            Color32::from_rgb(248, 148, 65),
-            Color32::from_rgb(253, 195, 40),
-            Color32::from_rgb(240, 249, 33),
-        ][..count.min(9)].to_vec(),
-    }
-}
-
-/// Generate diverging color scheme
-pub fn get_diverging_colors(scheme: &DivergingScheme, count: usize) -> Vec<Color32> {
-    match scheme {
-        DivergingScheme::RdBu => generate_diverging_gradient(
-            Color32::from_rgb(178, 24, 43),
-            Color32::from_rgb(247, 247, 247),
-            Color32::from_rgb(33, 102, 172),
-            count
-        ),
-        DivergingScheme::RdYlBu => generate_diverging_gradient(
-            Color32::from_rgb(215, 48, 39),
-            Color32::from_rgb(255, 255, 191),
-            Color32::from_rgb(69, 117, 180),
-            count
-        ),
-        DivergingScheme::Spectral => vec![
-            Color32::from_rgb(158, 1, 66),
-            Color32::from_rgb(213, 62, 79),
-            Color32::from_rgb(244, 109, 67),
-            Color32::from_rgb(253, 174, 97),
-            Color32::from_rgb(254, 224, 139),
-            Color32::from_rgb(255, 255, 191),
-            Color32::from_rgb(230, 245, 152),
-            Color32::from_rgb(171, 221, 164),
-            Color32::from_rgb(102, 194, 165),
-            Color32::from_rgb(50, 136, 189),
-            Color32::from_rgb(94, 79, 162),
-        ][..count.min(11)].to_vec(),
-        DivergingScheme::Coolwarm => generate_diverging_gradient(
-            Color32::from_rgb(59, 76, 192),
-            Color32::from_rgb(221, 221, 221),
-            Color32::from_rgb(180, 4, 38),
-            count
-        ),
-    }
-}
-
-/// Generate color gradient between two colors
-fn generate_color_gradient(start: Color32, end: Color32, count: usize) -> Vec<Color32> {
-    if count == 0 {
-        return vec![];
-    }
-    if count == 1 {
-        return vec![start];
-    }
-    
-    let mut colors = Vec::new();
-    for i in 0..count {
-        let t = i as f32 / (count - 1) as f32;
-        let r = (start.r() as f32 * (1.0 - t) + end.r() as f32 * t) as u8;
-        let g = (start.g() as f32 * (1.0 - t) + end.g() as f32 * t) as u8;
-        let b = (start.b() as f32 * (1.0 - t) + end.b() as f32 * t) as u8;
-        colors.push(Color32::from_rgb(r, g, b));
-    }
-    colors
-}
-
-/// Generate diverging color gradient with three colors
-fn generate_diverging_gradient(start: Color32, middle: Color32, end: Color32, count: usize) -> Vec<Color32> {
-    if count == 0 {
-        return vec![];
-    }
-    if count == 1 {
-        return vec![middle];
-    }
-    
-    let mut colors = Vec::new();
-    let half = count / 2;
-    
-    // First half: start to middle
-    for i in 0..=half {
-        let t = i as f32 / half as f32;
-        let r = (start.r() as f32 * (1.0 - t) + middle.r() as f32 * t) as u8;
-        let g = (start.g() as f32 * (1.0 - t) + middle.g() as f32 * t) as u8;
-        let b = (start.b() as f32 * (1.0 - t) + middle.b() as f32 * t) as u8;
-        colors.push(Color32::from_rgb(r, g, b));
-    }
-    
-    // Second half: middle to end
-    for i in 1..=(count - half - 1) {
-        let t = i as f32 / (count - half - 1) as f32;
-        let r = (middle.r() as f32 * (1.0 - t) + end.r() as f32 * t) as u8;
-        let g = (middle.g() as f32 * (1.0 - t) + end.g() as f32 * t) as u8;
-        let b = (middle.b() as f32 * (1.0 - t) + end.b() as f32 * t) as u8;
-        colors.push(Color32::from_rgb(r, g, b));
-    }
-    
-    colors
+    scheme.get_colors(10)
 }
 
 /// Re-export commonly used items
@@ -965,4 +945,4 @@ pub use self::histogram::HistogramPlot;
 pub use self::box_plot::BoxPlotImpl;
 pub use self::data_processor::{DataProcessor, AnomalyMethod, BoxPlotStats};
 pub use self::heatmap::HeatmapPlot;
-pub use self::violin::ViolinPlot;
+pub use self::violin::{ViolinPlot, ViolinPlotConfig};

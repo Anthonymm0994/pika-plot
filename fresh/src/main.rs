@@ -100,7 +100,7 @@ fn create_fresh_icon() -> egui::IconData {
     }
 }
 
-impl eframe::App for FreshApp {
+impl<'a> eframe::App for FreshApp<'a> {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update(ctx);
     }

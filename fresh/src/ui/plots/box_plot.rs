@@ -1,6 +1,6 @@
 use egui::{Ui, Color32, RichText, Stroke};
 use std::ops::Add;
-use egui_plot::{Plot, PlotPoints, Points, Line, Legend, PlotUi, BoxElem, BoxPlot as EguiBoxPlot, BoxSpread};
+use egui_plot::{Plot, PlotPoints, Points, Line, Legend, PlotUi};
 use datafusion::arrow::datatypes::DataType;
 use std::collections::{HashMap, HashSet};
 
@@ -88,71 +88,21 @@ impl BoxPlotImpl {
     }
     
     /// Render a highlighted box plot
-    fn render_highlighted_box_plot(&self, plot_ui: &PlotUi, stats: &BoxPlotStats, x_pos: f64, name: &str) {
-        let box_width = 0.3;
-        let whisker_width = 0.15;
-        let highlight_color = Color32::from_rgb(150, 200, 255);
-        let median_color = Color32::from_rgb(255, 120, 120);
+    fn render_highlighted_box_plot(&self, _plot_ui: &PlotUi, stats: &BoxPlotStats, x_pos: f64, _name: &str) {
+        let _whisker_width = 0.15;
+        let _highlight_color = Color32::from_rgb(150, 200, 255);
+        let _median_color = Color32::from_rgb(255, 120, 120);
         
-        // Box (Q1 to Q3)
-        let box_points = vec![
-            [x_pos - box_width/2.0, stats.q1],
-            [x_pos + box_width/2.0, stats.q1],
-            [x_pos + box_width/2.0, stats.q3],
-            [x_pos - box_width/2.0, stats.q3],
-            [x_pos - box_width/2.0, stats.q1],
+        // Create box plot points for highlighting
+        let _box_points = vec![
+            [x_pos, stats.min],
+            [x_pos, stats.q1],
+            [x_pos, stats.median],
+            [x_pos, stats.q3],
+            [x_pos, stats.max],
         ];
-        // plot_ui.line(Line::new(PlotPoints::from(box_points))
-        //     .color(highlight_color)
-        //     .width(3.0)
-        //     .name(name));
         
-        // Median line
-        // plot_ui.line(Line::new(PlotPoints::from(vec![
-        //     [x_pos - box_width/2.0, stats.median],
-        //     [x_pos + box_width/2.0, stats.median],
-        // ])).color(median_color).width(4.0));
-        
-        // Whiskers
-        // Lower whisker
-        // plot_ui.line(Line::new(PlotPoints::from(vec![
-        //     [x_pos, stats.q1],
-        //     [x_pos, stats.min],
-        // ])).color(highlight_color).width(2.0));
-        
-        // plot_ui.line(Line::new(PlotPoints::from(vec![
-        //     [x_pos - whisker_width/2.0, stats.min],
-        //     [x_pos + whisker_width/2.0, stats.min],
-        // ])).color(highlight_color).width(2.0));
-        
-        // Upper whisker
-        // plot_ui.line(Line::new(PlotPoints::from(vec![
-        //     [x_pos, stats.q3],
-        //     [x_pos, stats.max],
-        // ])).color(highlight_color).width(2.0));
-        
-        // plot_ui.line(Line::new(PlotPoints::from(vec![
-        //     [x_pos - whisker_width/2.0, stats.max],
-        //     [x_pos + whisker_width/2.0, stats.max],
-        // ])).color(highlight_color).width(2.0));
-        
-        // Outliers
-        if !stats.outliers.is_empty() {
-            let _outlier_points: PlotPoints = stats.outliers.iter()
-                .map(|&y| [x_pos, y])
-                .collect();
-            // plot_ui.points(Points::new(outlier_points)
-            //     .color(Color32::from_rgb(255, 120, 120))
-            //     .radius(4.0));
-        }
-        
-        // Mean if available
-        if stats.mean > 0.0 {
-            // plot_ui.points(Points::new(vec![[x_pos, stats.mean]])
-            //     .color(Color32::from_rgb(50, 200, 50))
-            //     .shape(egui_plot::MarkerShape::Diamond)
-            //     .radius(5.0));
-        }
+        // TODO: Implement highlighted box plot rendering
     }
     
     /// Process data for box plot with proper grouping
@@ -336,28 +286,72 @@ impl BoxPlotImpl {
         }
     }
     
-    /// Render a box plot using egui_plot
+    /// Render a box plot using egui_plot primitives
     fn render_box_plot(&self, plot_ui: &mut PlotUi, stats: &BoxPlotStats, x_pos: f64, color: Color32, name: &str, show_outliers: bool, show_mean: bool) {
-        // Create box element
-        let box_elem = BoxElem::new(
-            x_pos,
-            BoxSpread::new(
-                stats.min,
-                stats.q1,
-                stats.median,
-                stats.q3,
-                stats.max,
-            )
-        )
-        .name(name)
-        .box_width(0.3)
-        .whisker_width(0.15)
-        .stroke(Stroke::new(1.5, color));
+        let box_width = 0.3;
+        let whisker_width = 0.15;
         
-        // Add to plot
-        plot_ui.box_plot(EguiBoxPlot::new(vec![box_elem]));
+        // Draw the box (rectangle from Q1 to Q3)
+        let box_rect = vec![
+            [x_pos - box_width/2.0, stats.q1],
+            [x_pos + box_width/2.0, stats.q1],
+            [x_pos + box_width/2.0, stats.q3],
+            [x_pos - box_width/2.0, stats.q3],
+        ];
         
-        // Add outliers if enabled
+        // Draw box outline
+        let box_line = Line::new(box_rect.clone())
+            .color(color)
+            .width(1.5)
+            .name(name);
+        plot_ui.line(box_line);
+        
+        // Draw median line
+        let median_line = Line::new(vec![
+            [x_pos - box_width/2.0, stats.median],
+            [x_pos + box_width/2.0, stats.median],
+        ])
+        .color(Color32::from_rgb(255, 100, 100))
+        .width(2.0);
+        plot_ui.line(median_line);
+        
+        // Draw whiskers
+        let upper_whisker = Line::new(vec![
+            [x_pos, stats.q3],
+            [x_pos, stats.max],
+        ])
+        .color(color)
+        .width(1.0);
+        
+        let lower_whisker = Line::new(vec![
+            [x_pos, stats.q1],
+            [x_pos, stats.min],
+        ])
+        .color(color)
+        .width(1.0);
+        
+        plot_ui.line(upper_whisker);
+        plot_ui.line(lower_whisker);
+        
+        // Draw whisker caps
+        let upper_cap = Line::new(vec![
+            [x_pos - whisker_width/2.0, stats.max],
+            [x_pos + whisker_width/2.0, stats.max],
+        ])
+        .color(color)
+        .width(1.0);
+        
+        let lower_cap = Line::new(vec![
+            [x_pos - whisker_width/2.0, stats.min],
+            [x_pos + whisker_width/2.0, stats.min],
+        ])
+        .color(color)
+        .width(1.0);
+        
+        plot_ui.line(upper_cap);
+        plot_ui.line(lower_cap);
+        
+        // Draw outliers as points
         if show_outliers && !stats.outliers.is_empty() {
             let outlier_points: PlotPoints = stats.outliers.iter()
                 .map(|&y| [x_pos, y])
@@ -367,7 +361,7 @@ impl BoxPlotImpl {
                 .radius(3.0));
         }
         
-        // Add mean if enabled
+        // Draw mean as a different colored point if enabled
         if show_mean {
             plot_ui.points(Points::new(vec![[x_pos, stats.mean]])
                 .color(Color32::from_rgb(50, 200, 50))
@@ -477,7 +471,7 @@ impl PlotTrait for BoxPlotImpl {
         // Extract stats_map from the first point's tooltip_data
         let mut stats_map = HashMap::new();
         if let Some(first_point) = data.points.first() {
-            if let Some(stats_str) = first_point.tooltip_data.get("__stats_map__") {
+            if let Some(_stats_str) = first_point.tooltip_data.get("__stats_map__") {
                 // This is just a placeholder - in a real implementation, we would serialize/deserialize properly
                 // For now, we'll reconstruct the stats from the points
                 

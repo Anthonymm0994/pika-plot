@@ -86,7 +86,7 @@ impl HistogramPlot {
         
         // Get histogram specific config
         let default_config;
-        let hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
+        let _hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
             cfg
         } else {
             default_config = self.get_default_config();
@@ -111,7 +111,7 @@ impl HistogramPlot {
         }
         
         // Determine bin count
-        let bin_count = if let Some(count) = hist_config.bin_count {
+        let bin_count = if let Some(count) = _hist_config.bin_count {
             count
         } else {
             self.calculate_optimal_bin_count(&values)
@@ -169,7 +169,7 @@ impl HistogramPlot {
         // Add normal distribution curve if requested
         let mut all_series = vec![series];
         
-        if hist_config.show_normal_curve && values.len() > 2 {
+        if _hist_config.show_normal_curve && values.len() > 2 {
             // Calculate mean and standard deviation
             let mean = values.iter().sum::<f64>() / values.len() as f64;
             let variance = values.iter()
@@ -280,7 +280,7 @@ impl PlotTrait for HistogramPlot {
         // Use tokio runtime to run async data processing
         let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
         
-        let (series, bin_edges) = rt.block_on(self.process_data(query_result, config))?;
+        let (series, _bin_edges) = rt.block_on(self.process_data(query_result, config))?;
         
         // Calculate statistics
         let y_idx = query_result.columns.iter().position(|c| c == &config.y_column)
@@ -351,7 +351,7 @@ impl PlotTrait for HistogramPlot {
         
         // Get histogram specific config
         let default_config;
-        let hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
+        let _hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
             cfg
         } else {
             default_config = self.get_default_config();
