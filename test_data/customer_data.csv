@@ -1,6 +1,0 @@
-customer_id,name,email,age,signup_date,premium
-101,John Smith,john@email.com,35,2023-05-10,true
-102,Jane Doe,jane@email.com,28,2023-06-15,false
-103,Bob Johnson,bob@email.com,42,2023-07-20,true
-104,Alice Brown,alice@email.com,31,2023-08-25,false
-105,Charlie Wilson,charlie@email.com,29,2023-09-30,true 

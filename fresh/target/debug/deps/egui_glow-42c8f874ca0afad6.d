@@ -1,0 +1,11 @@
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\egui_glow-42c8f874ca0afad6.d: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\painter.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\misc_util.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader_version.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\vao.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/vertex.glsl C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/fragment.glsl
+
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\libegui_glow-42c8f874ca0afad6.rmeta: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\painter.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\misc_util.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader_version.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\vao.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/vertex.glsl C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/fragment.glsl
+
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\lib.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\painter.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\misc_util.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader_version.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\vao.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/vertex.glsl:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui_glow-0.29.1\src\shader/fragment.glsl:

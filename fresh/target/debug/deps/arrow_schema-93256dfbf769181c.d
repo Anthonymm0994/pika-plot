@@ -1,0 +1,10 @@
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\arrow_schema-93256dfbf769181c.d: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\datatype.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\error.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\field.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\fields.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\schema.rs
+
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\libarrow_schema-93256dfbf769181c.rmeta: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\datatype.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\error.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\field.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\fields.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\schema.rs
+
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\lib.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\datatype.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\error.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\field.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\fields.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-schema-51.0.0\src\schema.rs:

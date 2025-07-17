@@ -1,0 +1,11 @@
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\arrow_ord-bfd12f4c77fc1d74.d: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\cmp.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\comparison.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\ord.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\partition.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\rank.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\sort.rs
+
+C:\Users\antho\source\repos\pika-plot\fresh\target\debug\deps\libarrow_ord-bfd12f4c77fc1d74.rmeta: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\cmp.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\comparison.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\ord.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\partition.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\rank.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\sort.rs
+
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\lib.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\cmp.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\comparison.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\ord.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\partition.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\rank.rs:
+C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrow-ord-52.2.0\src\sort.rs:
