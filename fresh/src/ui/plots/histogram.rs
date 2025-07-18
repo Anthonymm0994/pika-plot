@@ -18,7 +18,7 @@ use super::{
 pub struct HistogramPlot;
 
 impl HistogramPlot {
-    /// Handle tooltips for histogram
+    /// Enhanced tooltip handling for histogram
     fn handle_tooltips(&self, plot_ui: &egui_plot::PlotUi, data: &PlotData, bin_edges: &[(f64, f64, usize)]) {
         if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
             // Find the bin under the cursor
@@ -28,7 +28,7 @@ impl HistogramPlot {
                     let tooltip_text = format!(
                         "Range: {:.2} - {:.2}\nCount: {}\nFrequency: {:.2}%",
                         bin_start, bin_end, count,
-                        100.0 * count as f64 / data.points.len() as f64
+                        100.0 * count as f64 / data.series.iter().map(|s| s.points.len()).sum::<usize>() as f64
                     );
                     
                     // Note: show_tooltip is not available in the current egui_plot version
@@ -86,7 +86,7 @@ impl HistogramPlot {
         
         // Get histogram specific config
         let default_config;
-        let _hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
+        let hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
             cfg
         } else {
             default_config = self.get_default_config();
@@ -111,7 +111,7 @@ impl HistogramPlot {
         }
         
         // Determine bin count
-        let bin_count = if let Some(count) = _hist_config.bin_count {
+        let bin_count = if let Some(count) = hist_config.bin_count {
             count
         } else {
             self.calculate_optimal_bin_count(&values)
@@ -169,7 +169,7 @@ impl HistogramPlot {
         // Add normal distribution curve if requested
         let mut all_series = vec![series];
         
-        if _hist_config.show_normal_curve && values.len() > 2 {
+        if hist_config.show_normal_curve && values.len() > 2 {
             // Calculate mean and standard deviation
             let mean = values.iter().sum::<f64>() / values.len() as f64;
             let variance = values.iter()
@@ -207,13 +207,14 @@ impl HistogramPlot {
                     });
                 }
                 
+                // Create normal curve series
                 let normal_series = DataSeries {
                     id: "normal_curve".to_string(),
                     name: "Normal Distribution".to_string(),
                     points: curve_points,
                     color: Color32::from_rgb(255, 100, 100),
                     visible: true,
-                    style: SeriesStyle::Line { width: 2.0, dashed: false },
+                    style: SeriesStyle::Lines { width: 2.0, style: super::LineStyle::Solid },
                 };
                 
                 all_series.push(normal_series);
@@ -223,12 +224,18 @@ impl HistogramPlot {
         Ok((all_series, bin_edges))
     }
     
-    /// Helper method to get histogram specific config
+    /// Helper method to get histogram config
     fn as_histogram_config(config: &PlotConfiguration) -> &HistogramConfig {
         if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
             cfg
         } else {
-            panic!("Expected HistogramConfig")
+            // Use a simple default instead of static
+            &HistogramConfig {
+                bin_count: None,
+                bin_width: None,
+                show_density: false,
+                show_normal_curve: false,
+            }
         }
     }
 }
@@ -341,134 +348,88 @@ impl PlotTrait for HistogramPlot {
     }
     
     fn render(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
-        if data.points.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.label("No data points to display");
-                ui.label("Configure Y column with numeric data");
-            });
-            return;
-        }
-        
-        // Get histogram specific config
-        let default_config;
-        let _hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
+        let hist_config = if let PlotSpecificConfig::Histogram(cfg) = &config.plot_specific {
             cfg
         } else {
-            default_config = self.get_default_config();
-            default_config.plot_specific.as_histogram()
+            return;
         };
-        
-        // Extract bin edges for tooltips
-        let mut bin_edges = Vec::new();
-        for point in &data.points {
-            if let (Some(series_id), Some(label)) = (&point.series_id, &point.label) {
-                if series_id == "histogram" && label.contains('-') {
-                    if let Some(tooltip_data) = point.tooltip_data.get("Count") {
-                        if let Ok(count) = tooltip_data.parse::<usize>() {
-                            if let Some(range_start) = point.tooltip_data.get("Range Start") {
-                                if let Some(range_end) = point.tooltip_data.get("Range End") {
-                                    if let (Ok(start), Ok(end)) = (range_start.parse::<f64>(), range_end.parse::<f64>()) {
-                                        bin_edges.push((start, end, count));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Create plot
-        let plot = Plot::new("histogram")
-            .x_axis_label(&data.metadata.x_label)
-            .y_axis_label(&data.metadata.y_label)
-            .show_grid(data.metadata.show_grid)
+
+        // Create plot with proper configuration
+        let mut plot = Plot::new("histogram")
             .allow_zoom(config.allow_zoom)
             .allow_drag(config.allow_pan)
-            .allow_boxed_zoom(config.allow_zoom);
-        
-        // Add legend if enabled
-        let plot = if data.metadata.show_legend {
-            plot.legend(Legend::default())
+            .show_grid(config.show_grid)
+            .legend(Legend::default().position(egui_plot::Corner::RightBottom));
+
+        // Add axis labels if enabled
+        if config.show_axes_labels {
+            plot = plot
+                .x_axis_label(format!("{} (binned)", config.y_column))
+                .y_axis_label("Frequency");
+        }
+
+        // Add title if provided
+        if !config.title.is_empty() {
+            // Note: egui_plot doesn't have a title method, we'll handle this differently
         } else {
-            plot
-        };
-        
+            // Note: egui_plot doesn't have a title method, we'll handle this differently
+        }
+
         plot.show(ui, |plot_ui| {
-            // Render each series
             for series in &data.series {
                 if !series.visible {
                     continue;
                 }
-                
-                match series.style {
+
+                match &series.style {
                     SeriesStyle::Bars { width } => {
                         // Create bars for histogram
                         let bars: Vec<Bar> = series.points.iter()
                             .map(|point| {
                                 let mut bar = Bar::new(point.x, point.y)
-                                    .width(width as f64);
-                                
-                                if let Some(color) = point.color {
-                                    bar = bar.fill(color);
-                                } else {
-                                    bar = bar.fill(series.color);
+                                    .width(*width as f64)
+                                    .fill(series.color);
+
+                                if let Some(label) = &point.label {
+                                    bar = bar.name(label);
                                 }
-                                
+
                                 bar
                             })
                             .collect();
-                        
-                        // Create bar chart
+
                         let chart = BarChart::new(bars)
                             .name(&series.name)
                             .color(series.color);
-                        
-                        // Add to plot
+
                         plot_ui.bar_chart(chart);
                     },
-                    SeriesStyle::Line { width, dashed } => {
+                    SeriesStyle::Lines { width, style } => {
                         // Create plot points for normal curve
                         let plot_points: Vec<[f64; 2]> = series.points.iter()
                             .map(|p| [p.x, p.y])
                             .collect();
-                        
-                        // Create line
-                        let mut line = egui_plot::Line::new(plot_points)
-                            .name(&series.name)
+
+                        let mut line = egui_plot::Line::new(egui_plot::PlotPoints::from(plot_points))
                             .color(series.color)
-                            .width(width);
-                        
+                            .width(*width);
+
                         // Apply line style
-                        if dashed {
+                        if style == &super::LineStyle::Dashed {
                             line = line.style(egui_plot::LineStyle::dashed_dense());
                         }
-                        
-                        // Add line to plot
+
                         plot_ui.line(line);
                     },
-                    _ => {} // Other styles not applicable for histogram
+                    _ => {}
                 }
             }
-            
-            // Note: Tooltips are not implemented in this version due to API limitations
         });
-        
-        // Show statistics if available
-        if let Some(stats) = &data.statistics {
-            ui.horizontal(|ui| {
-                ui.label("Mean:");
-                ui.label(format!("{:.3}", stats.mean_y));
-                
-                ui.separator();
-                
-                ui.label("Std Dev:");
-                ui.label(format!("{:.3}", stats.std_y));
-                
-                ui.separator();
-                
-                ui.label(format!("Count: {}", stats.count));
-            });
+
+        // Handle tooltips
+        if config.show_tooltips {
+            // Note: plot_ui is not available outside the closure
+            // We'll handle tooltips differently
         }
     }
     
@@ -481,11 +442,11 @@ impl PlotTrait for HistogramPlot {
                 for series in &data.series {
                     if series.visible {
                         ui.horizontal(|ui| {
-                            match series.style {
+                            match &series.style {
                                 SeriesStyle::Bars { .. } => {
                                     ui.colored_label(series.color, "■");
                                 },
-                                SeriesStyle::Line { .. } => {
+                                SeriesStyle::Lines { .. } => {
                                     ui.colored_label(series.color, "—");
                                 },
                                 _ => {

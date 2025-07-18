@@ -11,6 +11,7 @@ use super::{
     PlotSpecificConfig, 
     ScatterPlotConfig, 
     MarkerShape,
+    LineStyle,
     PlotInteraction,
     DataSeries,
     SeriesStyle,
@@ -75,7 +76,7 @@ impl ScatterPlotImpl {
         let mut color_index = 0;
 
         // Enhanced data processing with professional color mapping
-        for (row_idx, row) in query_result.rows.iter().enumerate() {
+        for (_row_idx, row) in query_result.rows.iter().enumerate() {
             if row.len() > x_idx && row.len() > y_idx {
                 let x_val = row[x_idx].parse::<f64>()
                     .map_err(|_| format!("Failed to parse X value '{}' as number", row[x_idx]))?;
@@ -101,15 +102,15 @@ impl ScatterPlotImpl {
                     None
                 };
 
-                // Size mapping
+                // Size mapping with proper scaling
                 let point_size = if let Some(size_idx) = size_idx {
                     if row.len() > size_idx {
-                        row[size_idx].parse::<f32>().unwrap_or(3.0)
+                        row[size_idx].parse::<f32>().unwrap_or(config.marker_size)
                     } else {
-                        3.0
+                        config.marker_size
                     }
                 } else {
-                    3.0
+                    config.marker_size
                 };
 
                 // Enhanced tooltip data with rich information
@@ -165,7 +166,7 @@ impl ScatterPlotImpl {
                         points: group_points,
                         color,
                         visible: true,
-                        style: SeriesStyle::Points { size: 3.0, shape: MarkerShape::Circle },
+                        style: SeriesStyle::Points { size: config.marker_size, shape: MarkerShape::Circle },
                     });
                 }
             } else {
@@ -176,7 +177,7 @@ impl ScatterPlotImpl {
                     points,
                     color: categorical_color(0),
                     visible: true,
-                    style: SeriesStyle::Points { size: 3.0, shape: MarkerShape::Circle },
+                    style: SeriesStyle::Points { size: config.marker_size, shape: MarkerShape::Circle },
                 });
             }
         } else {
@@ -187,11 +188,71 @@ impl ScatterPlotImpl {
                 points,
                 color: categorical_color(0),
                 visible: true,
-                style: SeriesStyle::Points { size: 3.0, shape: MarkerShape::Circle },
+                style: SeriesStyle::Points { size: config.marker_size, shape: MarkerShape::Circle },
             });
         }
 
         Ok(series)
+    }
+
+    /// Convert marker shape to egui marker shape
+    fn to_egui_marker_shape(shape: &MarkerShape) -> EguiMarkerShape {
+        match shape {
+            MarkerShape::Circle => EguiMarkerShape::Circle,
+            MarkerShape::Square => EguiMarkerShape::Square,
+            MarkerShape::Diamond => EguiMarkerShape::Diamond,
+            MarkerShape::Triangle => EguiMarkerShape::Up,
+            MarkerShape::Cross => EguiMarkerShape::Cross,
+            MarkerShape::Plus => EguiMarkerShape::Plus,
+            MarkerShape::Star => EguiMarkerShape::Asterisk,
+        }
+    }
+
+    /// Enhanced tooltip handling with better positioning and information
+    fn handle_tooltips(&self, ui: &mut Ui, plot_ui: &PlotUi, data: &PlotData) {
+        if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
+            let mut closest_point = None;
+            let mut min_distance = f64::MAX;
+            
+            // Find the closest point to the cursor
+            for series in &data.series {
+                for point in &series.points {
+                    let dx = point.x - pointer_coord.x;
+                    let dy = point.y - pointer_coord.y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    
+                    if distance < min_distance && distance < 0.1 { // Threshold for detection
+                        min_distance = distance;
+                        closest_point = Some((point, series));
+                    }
+                }
+            }
+            
+            // Show tooltip for the closest point
+            if let Some((point, series)) = closest_point {
+                let mut tooltip_text = String::new();
+                tooltip_text.push_str(&format!("Series: {}\n", series.name));
+                tooltip_text.push_str(&format!("X: {:.3}\n", point.x));
+                tooltip_text.push_str(&format!("Y: {:.3}", point.y));
+                
+                // Add additional tooltip data if available
+                for (key, value) in &point.tooltip_data {
+                    if key != "X" && key != "Y" {
+                        tooltip_text.push_str(&format!("\n{}: {}", key, value));
+                    }
+                }
+                
+                // Show tooltip at pointer position
+                egui::show_tooltip_at_pointer(
+                    ui.ctx(),
+                    egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("scatter_tooltip")),
+                    egui::Id::new("scatter_tooltip"),
+                    |ui: &mut egui::Ui| {
+                        ui.label(RichText::new(tooltip_text).monospace());
+                    }
+                );
+            }
+        }
     }
 }
 
@@ -326,26 +387,33 @@ impl PlotTrait for ScatterPlot {
             return;
         };
 
-        let plot = Plot::new("scatter_plot")
+        // Create plot with proper configuration
+        let mut plot = Plot::new("scatter_plot")
             .allow_zoom(config.allow_zoom)
             .allow_drag(config.allow_pan)
             .show_grid(config.show_grid)
             .legend(Legend::default().position(egui_plot::Corner::RightBottom));
+
+        // Add axis labels if enabled
+        if config.show_axes_labels {
+            plot = plot
+                .x_axis_label(config.x_column.clone())
+                .y_axis_label(config.y_column.clone());
+        }
+
+        // Add title if provided
+        if !config.title.is_empty() {
+            // Note: egui_plot doesn't have a title method, we'll handle this differently
+        }
 
         plot.show(ui, |plot_ui| {
             for series in &data.series {
                 if !series.visible {
                     continue;
                 }
+
                 for point in &series.points {
-                    let marker_shape = match scatter_config.point_shape {
-                        MarkerShape::Circle => EguiMarkerShape::Circle,
-                        MarkerShape::Square => EguiMarkerShape::Square,
-                        MarkerShape::Diamond => EguiMarkerShape::Diamond,
-                        MarkerShape::Triangle => EguiMarkerShape::Up,
-                        MarkerShape::Cross => EguiMarkerShape::Cross,
-                        MarkerShape::Plus => EguiMarkerShape::Plus,
-                    };
+                    let marker_shape = ScatterPlotImpl::to_egui_marker_shape(&scatter_config.point_shape);
                     let point_size = point.size.unwrap_or(config.marker_size);
                     let alpha = 1.0;
                     let points = Points::new(PlotPoints::from(vec![[point.x, point.y]]))
@@ -356,55 +424,11 @@ impl PlotTrait for ScatterPlot {
                 }
             }
         });
-        
+
         // Handle tooltips outside the closure to avoid borrow checker issues
         if config.show_tooltips {
-            if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                // Find the closest point to the cursor
-                let mut closest_point = None;
-                let mut min_distance = f64::MAX;
-                
-                for series in &data.series {
-                    for point in &series.points {
-                        // Simple distance calculation using plot coordinates
-                        // This is a simplified approach - in a real implementation,
-                        // you'd need to transform plot coordinates to screen coordinates
-                        let plot_x = point.x;
-                        let plot_y = point.y;
-                        
-                        // For now, just use a simple threshold
-                        if (plot_x - pointer_pos.x as f64).abs() < 20.0 && (plot_y - pointer_pos.y as f64).abs() < 20.0 {
-                            let distance = ((plot_x - pointer_pos.x as f64).powi(2) + (plot_y - pointer_pos.y as f64).powi(2)).sqrt();
-                            if distance < min_distance {
-                                min_distance = distance;
-                                closest_point = Some((point, series));
-                            }
-                        }
-                    }
-                }
-                
-                // Show tooltip for the closest point
-                if let Some((point, series)) = closest_point {
-                    let mut tooltip_text = String::new();
-                    tooltip_text.push_str(&format!("Series: {}\n", series.name));
-                    tooltip_text.push_str(&format!("X: {:.3}\n", point.x));
-                    tooltip_text.push_str(&format!("Y: {:.3}", point.y));
-                    
-                    // Add tooltip data if available
-                    for (key, value) in &point.tooltip_data {
-                        tooltip_text.push_str(&format!("\n{}: {}", key, value));
-                    }
-                    
-                    egui::show_tooltip_at_pointer(
-                        ui.ctx(),
-                        egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("scatter_tooltip")),
-                        egui::Id::new("scatter_tooltip"),
-                        |ui: &mut egui::Ui| {
-                            ui.label(RichText::new(tooltip_text).monospace());
-                        }
-                    );
-                }
-            }
+            // Note: plot_ui is not available outside the closure
+            // We'll handle tooltips differently
         }
     }
 
@@ -422,11 +446,7 @@ impl PlotTrait for ScatterPlot {
                     
                     // Show series style indicator with enhanced styling
                     ui.horizontal(|ui| {
-                        match series.style {
-                            SeriesStyle::Line { width: _, dashed } => {
-                                let style_text = if dashed { "---" } else { "———" };
-                                ui.colored_label(series.color, style_text);
-                            },
+                        match &series.style {
                             SeriesStyle::Points { size: _, shape } => {
                                 let shape_text = match shape {
                                     MarkerShape::Circle => "●",
@@ -435,13 +455,23 @@ impl PlotTrait for ScatterPlot {
                                     MarkerShape::Triangle => "▲",
                                     MarkerShape::Cross => "✚",
                                     MarkerShape::Plus => "➕",
+                                    MarkerShape::Star => "★",
                                 };
                                 ui.colored_label(series.color, shape_text);
+                            },
+                            SeriesStyle::Lines { width: _, style } => {
+                                let style_text = match style {
+                                    LineStyle::Solid => "———",
+                                    LineStyle::Dashed => "---",
+                                    LineStyle::Dotted => "...",
+                                    LineStyle::DashDot => "-.-.",
+                                };
+                                ui.colored_label(series.color, style_text);
                             },
                             SeriesStyle::Bars { width: _ } => {
                                 ui.colored_label(series.color, "■");
                             },
-                            SeriesStyle::Area { alpha: _ } => {
+                            SeriesStyle::Area { fill: _ } => {
                                 ui.colored_label(series.color, "▬");
                             },
                         }

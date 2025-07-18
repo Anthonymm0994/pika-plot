@@ -273,7 +273,7 @@ impl PlotTrait for DistributionPlot {
             points: kde_plot_points,
             color: Color32::from_rgb(255, 100, 100),
             visible: true,
-            style: super::SeriesStyle::Line { width: 2.0, dashed: false },
+            style: super::SeriesStyle::Lines { width: 2.0, style: super::LineStyle::Solid },
         });
         
         Ok(PlotData {
@@ -398,12 +398,17 @@ impl PlotTrait for DistributionPlot {
                 }
                 
                 ui.horizontal(|ui| {
-                    match series.style {
+                    match &series.style {
                         super::SeriesStyle::Bars { width: _ } => {
                             ui.colored_label(series.color, "■");
                         },
-                        super::SeriesStyle::Line { width: _, dashed } => {
-                            let style_text = if dashed { "---" } else { "———" };
+                        super::SeriesStyle::Lines { width: _, style } => {
+                            let style_text = match style {
+                                super::LineStyle::Solid => "———",
+                                super::LineStyle::Dashed => "---",
+                                super::LineStyle::Dotted => "...",
+                                super::LineStyle::DashDot => "-.-.",
+                            };
                             ui.colored_label(series.color, style_text);
                         },
                         _ => {

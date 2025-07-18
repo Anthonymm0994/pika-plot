@@ -449,7 +449,7 @@ impl PlotTrait for AnomalyPlot {
                 }
                 
                 ui.horizontal(|ui| {
-                    match series.style {
+                    match &series.style {
                         super::SeriesStyle::Points { size: _, shape } => {
                             let shape_text = match shape {
                                 super::MarkerShape::Circle => "●",

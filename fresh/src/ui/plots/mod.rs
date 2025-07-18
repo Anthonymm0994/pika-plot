@@ -168,11 +168,7 @@ pub trait Plot {
                     
                     // Show series style indicator
                     ui.horizontal(|ui| {
-                        match series.style {
-                            SeriesStyle::Line { width: _, dashed } => {
-                                let style_text = if dashed { "---" } else { "———" };
-                                ui.colored_label(series.color, style_text);
-                            },
+                        match &series.style {
                             SeriesStyle::Points { size: _, shape } => {
                                 let shape_text = match shape {
                                     MarkerShape::Circle => "●",
@@ -181,13 +177,23 @@ pub trait Plot {
                                     MarkerShape::Triangle => "▲",
                                     MarkerShape::Cross => "✚",
                                     MarkerShape::Plus => "➕",
+                                    MarkerShape::Star => "★",
                                 };
                                 ui.colored_label(series.color, shape_text);
+                            },
+                            SeriesStyle::Lines { width: _, style } => {
+                                let style_text = match style {
+                                    LineStyle::Solid => "———",
+                                    LineStyle::Dashed => "---",
+                                    LineStyle::Dotted => "...",
+                                    LineStyle::DashDot => "-.-.",
+                                };
+                                ui.colored_label(series.color, style_text);
                             },
                             SeriesStyle::Bars { width: _ } => {
                                 ui.colored_label(series.color, "■");
                             },
-                            SeriesStyle::Area { alpha: _ } => {
+                            SeriesStyle::Area { fill: _ } => {
                                 ui.colored_label(series.color, "▬");
                             },
                         }
@@ -287,14 +293,14 @@ pub struct DataStatistics {
 /// Series styling options
 #[derive(Debug, Clone)]
 pub enum SeriesStyle {
-    Line { width: f32, dashed: bool },
     Points { size: f32, shape: MarkerShape },
+    Lines { width: f32, style: LineStyle },
     Bars { width: f32 },
-    Area { alpha: f32 },
+    Area { fill: bool },
 }
 
 /// Marker shapes for point plots
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MarkerShape {
     Circle,
     Square,
@@ -302,6 +308,7 @@ pub enum MarkerShape {
     Triangle,
     Cross,
     Plus,
+    Star,
 }
 
 /// Comprehensive plot configuration
@@ -530,7 +537,7 @@ pub enum SortOrder {
 }
 
 /// Line styles
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LineStyle {
     Solid,
     Dashed,
