@@ -119,7 +119,7 @@ impl QueryWindow {
                             .show(ui, |ui| {
                                 self.render_results_table(ui, results);
                             });
-                    }
+                    });
                 }
                 
                 // Controls section at bottom - always visible
