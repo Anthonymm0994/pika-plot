@@ -1,56 +1,27 @@
-use egui::{Ui, Color32, RichText, Stroke};
-use egui_plot::{Plot, Legend, Line, Polygon, PlotPoint as EguiPlotPoint, 
-                Points, MarkerShape as EguiMarkerShape};
-use datafusion::arrow::datatypes::DataType;
-use std::collections::HashMap;
-use crate::core::QueryResult;
-
 use super::{
-    Plot as PlotTrait, 
-    PlotData, 
-    PlotConfiguration, 
-    PlotSpecificConfig, 
-    PlotInteraction,
-    DataSeries,
-    SeriesStyle,
-    MarkerShape,
-    PlotMetadata,
-    DataStatistics,
-    data_processor::{DataProcessor, BoxPlotStats}
+    Plot as PlotTrait, PlotData, PlotConfiguration, PlotPoint, DataSeries, PlotMetadata, ColorScheme,
+    PlotInteraction, PlotSpecificConfig, ViolinPlotConfig, DataStatistics, SeriesStyle,
 };
+use crate::core::QueryResult;
+use crate::ui::plots::data_processor::DataProcessor;
+use egui::{Color32, Ui, RichText, Stroke};
+use egui_plot::{Plot, PlotPoint as EguiPlotPoint, PlotPoints, Polygon, MarkerShape as EguiMarkerShape, Line, Points, Legend, MarkerShape};
+use std::collections::HashMap;
 
-/// Configuration for violin plots
+/// Box plot statistics for violin plots
 #[derive(Debug, Clone)]
-pub struct ViolinPlotConfig {
-    pub bandwidth: f32,
-    pub show_box_plot: bool,
-    pub show_mean: bool,
-    pub show_median: bool,
-    pub show_quartiles: bool,
-    pub show_outliers: bool,
-    pub violin_width: f32,
-    pub kde_points: usize,
-    pub comparison_mode: bool,
-    pub normalize_width: bool,
-    pub show_distribution_curve: bool,
-}
-
-impl Default for ViolinPlotConfig {
-    fn default() -> Self {
-        Self {
-            bandwidth: 0.5,
-            show_box_plot: true,
-            show_mean: true,
-            show_median: true,
-            show_quartiles: true,
-            show_outliers: true,
-            violin_width: 0.8,
-            kde_points: 100,
-            comparison_mode: false,
-            normalize_width: true,
-            show_distribution_curve: false,
-        }
-    }
+pub struct BoxPlotStats {
+    pub min: f64,
+    pub q1: f64,
+    pub median: f64,
+    pub q3: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub outliers: Vec<f64>,
+    pub group: Option<String>,
+    pub count: usize,
+    pub lower_fence: f64,
+    pub upper_fence: f64,
 }
 
 pub struct ViolinPlot {
@@ -225,8 +196,8 @@ impl ViolinPlot {
                 q3: 0.0,
                 max: 0.0,
                 mean: 0.0,
-                count: 0,
                 outliers: vec![],
+                count: 0,
                 lower_fence: 0.0,
                 upper_fence: 0.0,
             };
@@ -274,8 +245,8 @@ impl ViolinPlot {
             q3,
             max,
             mean,
-            count,
             outliers,
+            count,
             lower_fence,
             upper_fence,
         }
@@ -293,18 +264,18 @@ impl PlotTrait for ViolinPlot {
         "Violin Plot"
     }
     
-    fn required_x_types(&self) -> Option<Vec<DataType>> {
+    fn required_x_types(&self) -> Option<Vec<datafusion::arrow::datatypes::DataType>> {
         // Violin plots don't strictly need an X column, but can use categorical X for grouping
         None
     }
     
-    fn required_y_types(&self) -> Vec<DataType> {
+    fn required_y_types(&self) -> Vec<datafusion::arrow::datatypes::DataType> {
         // Y axis must be numeric for distribution analysis
         vec![
-            DataType::Int8, DataType::Int16, DataType::Int32, DataType::Int64,
-            DataType::UInt8, DataType::UInt16, DataType::UInt32, DataType::UInt64,
-            DataType::Float16, DataType::Float32, DataType::Float64,
-            DataType::Decimal128(38, 10), DataType::Decimal256(76, 10),
+            datafusion::arrow::datatypes::DataType::Int8, datafusion::arrow::datatypes::DataType::Int16, datafusion::arrow::datatypes::DataType::Int32, datafusion::arrow::datatypes::DataType::Int64,
+            datafusion::arrow::datatypes::DataType::UInt8, datafusion::arrow::datatypes::DataType::UInt16, datafusion::arrow::datatypes::DataType::UInt32, datafusion::arrow::datatypes::DataType::UInt64,
+            datafusion::arrow::datatypes::DataType::Float16, datafusion::arrow::datatypes::DataType::Float32, datafusion::arrow::datatypes::DataType::Float64,
+            datafusion::arrow::datatypes::DataType::Decimal128(38, 10), datafusion::arrow::datatypes::DataType::Decimal256(76, 10),
         ]
     }
     
@@ -359,7 +330,7 @@ impl PlotTrait for ViolinPlot {
                 points: vec![point],
                 color,
                 visible: true,
-                style: SeriesStyle::Points { size: 0.0, shape: MarkerShape::Circle }, // Style doesn't matter for violin plots
+                style: SeriesStyle::Points { size: 0.0, shape: super::MarkerShape::Circle }, // Style doesn't matter for violin plots
             };
             
             series.push(series_data);
@@ -373,6 +344,7 @@ impl PlotTrait for ViolinPlot {
             show_legend: config.show_legend,
             show_grid: config.show_grid,
             color_scheme: config.color_scheme.clone(),
+            extra_data: None,
         };
         
         // Flatten points for backward compatibility
@@ -434,7 +406,7 @@ impl PlotTrait for ViolinPlot {
         
         // If we have multiple series (groups), process each one
         if data.series.len() > 1 {
-            for (_i, series) in data.series.iter().enumerate() {
+            for (i, series) in data.series.iter().enumerate() {
                 if !series.visible {
                     continue;
                 }
@@ -748,7 +720,7 @@ impl PlotTrait for ViolinPlot {
                 }
             }
             
-            // Show distribution properties
+            // Show distribution properties if we have data
             if !violin_data.is_empty() {
                 let (_, values, stats) = &violin_data[0];
                 if !values.is_empty() {
@@ -756,48 +728,33 @@ impl PlotTrait for ViolinPlot {
                     let variance: f64 = values.iter()
                         .map(|&x| (x - stats.mean).powi(2))
                         .sum::<f64>() / values.len() as f64;
+                    
                     let std_dev = variance.sqrt();
                     
                     // Calculate skewness
                     let skewness: f64 = values.iter()
-                        .map(|&x| ((x - stats.mean) / std_dev).powi(3))
-                        .sum::<f64>() / values.len() as f64;
+                        .map(|&x| (x - stats.mean).powi(3))
+                        .sum::<f64>() / (values.len() as f64 * std_dev.powi(3));
                     
                     // Calculate kurtosis
                     let kurtosis: f64 = values.iter()
-                        .map(|&x| ((x - stats.mean) / std_dev).powi(4))
-                        .sum::<f64>() / values.len() as f64;
+                        .map(|&x| (x - stats.mean).powi(4))
+                        .sum::<f64>() / (values.len() as f64 * variance.powi(2));
                     
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(format!("Min: {:.2}", stats.min));
-                            ui.label(format!("Q1: {:.2}", stats.q1));
-                            ui.label(format!("Median: {:.2}", stats.median));
-                        });
-                        
-                        ui.vertical(|ui| {
-                            ui.label(format!("Q3: {:.2}", stats.q3));
-                            ui.label(format!("Max: {:.2}", stats.max));
-                            ui.label(format!("Mean: {:.2}", stats.mean));
-                        });
-                        
-                        ui.vertical(|ui| {
-                            ui.label(format!("Std Dev: {:.2}", std_dev));
-                            ui.label(format!("Skewness: {:.2}", skewness));
-                            ui.label(format!("Kurtosis: {:.2}", kurtosis));
-                        });
-                    });
+                    ui.label(format!("Mean: {:.2}", stats.mean));
+                    ui.label(format!("Median: {:.2}", stats.median));
+                    ui.label(format!("Standard Deviation: {:.2}", std_dev));
+                    ui.label(format!("Variance: {:.2}", variance));
+                    ui.label(format!("Skewness: {:.2}", skewness));
+                    ui.label(format!("Kurtosis: {:.2}", kurtosis));
                     
-                    // Add interpretation of distribution shape
-                    ui.separator();
-                    ui.label(RichText::new("Distribution Shape Analysis").strong());
-                    
-                    let shape_description = if skewness.abs() < 0.5 {
-                        "Approximately symmetric"
-                    } else if skewness < 0.0 {
+                    // Describe the distribution shape
+                    let shape_description = if skewness < -0.5 {
                         "Negatively skewed (left-tailed)"
-                    } else {
+                    } else if skewness > 0.5 {
                         "Positively skewed (right-tailed)"
+                    } else {
+                        "Approximately symmetric"
                     };
                     
                     let peakedness = if kurtosis < 3.0 {
@@ -886,6 +843,9 @@ impl PlotTrait for ViolinPlot {
     }
     
     fn handle_interaction(&self, _ui: &mut Ui, _data: &PlotData, _config: &PlotConfiguration) -> Option<PlotInteraction> {
+        // Enhanced interaction handling for violin plots
+        // This could be extended in the future to support selection of specific distribution regions
+        // or interactive bandwidth adjustment
         None
     }
 }

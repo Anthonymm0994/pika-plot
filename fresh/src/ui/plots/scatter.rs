@@ -36,8 +36,8 @@ impl ScatterPlotImpl {
         ];
         
         Polygon::new(PlotPoints::from(points))
-            .fill_color(Color32::from_rgba_unmultiplied(100, 150, 255, 50))
-            .stroke(egui::Stroke::new(2.0, Color32::from_rgb(100, 150, 255)))
+            .fill_color(Color32::from_rgba_unmultiplied(100, 150, 255, 30))
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(100, 150, 255, 150)))
     }
 
     /// Enhanced data processing with frog-viz patterns
@@ -375,6 +375,7 @@ impl PlotTrait for ScatterPlot {
                 show_legend: config.show_legend,
                 show_grid: config.show_grid,
                 color_scheme: config.color_scheme.clone(),
+                extra_data: None,
             },
             statistics,
         })
@@ -386,6 +387,18 @@ impl PlotTrait for ScatterPlot {
         } else {
             return;
         };
+
+        // Performance optimization: limit points for large datasets
+        let max_points = 100000; // Higher limit for scatter plots
+        let mut total_points = 0;
+        for series in &data.series {
+            total_points += series.points.len();
+        }
+        
+        if total_points > max_points {
+            ui.colored_label(egui::Color32::YELLOW, 
+                format!("⚠ Large dataset detected ({} points). Consider filtering data for better performance.", total_points));
+        }
 
         // Create plot with proper configuration
         let mut plot = Plot::new("scatter_plot")
@@ -401,44 +414,144 @@ impl PlotTrait for ScatterPlot {
                 .y_axis_label(config.y_column.clone());
         }
 
-        // Add title if provided
-        if !config.title.is_empty() {
-            // Note: egui_plot doesn't have a title method, we'll handle this differently
-        }
-
+        // Track hover state for highlighting
+        let mut hovered_point: Option<(usize, usize)> = None; // (series_idx, point_idx)
+        
+        // Find the closest point to the pointer for precise hover detection
+        let mut closest_point: Option<(usize, usize, f64)> = None; // (series_idx, point_idx, distance)
+        
         plot.show(ui, |plot_ui| {
-            for series in &data.series {
+            // Find the closest point to the pointer for precise hover detection
+            closest_point = None; // Reset for this frame
+            
+            for (series_idx, series) in data.series.iter().enumerate() {
                 if !series.visible {
                     continue;
                 }
 
-                for point in &series.points {
+                for (point_idx, point) in series.points.iter().enumerate() {
+                    if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
+                        let distance = ((pointer_coord.x - point.x).powi(2) + 
+                                     (pointer_coord.y - point.y).powi(2)).sqrt();
+                        let point_size = point.size.unwrap_or(config.marker_size);
+                        let hover_threshold = (point_size * 1.2) as f64; // More precise hover radius
+                        
+                        if distance < hover_threshold {
+                            // Update closest point if this one is closer
+                            if let Some((_, _, current_distance)) = closest_point {
+                                if distance < current_distance {
+                                    closest_point = Some((series_idx, point_idx, distance));
+                                }
+                            } else {
+                                closest_point = Some((series_idx, point_idx, distance));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Now render all points with proper highlighting
+            for (series_idx, series) in data.series.iter().enumerate() {
+                if !series.visible {
+                    continue;
+                }
+
+                for (point_idx, point) in series.points.iter().enumerate() {
+                    // Check if this is the closest hovered point
+                    let is_hovered = if let Some((hovered_series, hovered_point, _)) = closest_point {
+                        series_idx == hovered_series && point_idx == hovered_point
+                    } else {
+                        false
+                    };
+                    
                     let marker_shape = ScatterPlotImpl::to_egui_marker_shape(&scatter_config.point_shape);
                     let point_size = point.size.unwrap_or(config.marker_size);
                     let alpha = 1.0;
+                    
+                    // Use original color for consistency with legend
+                    let point_color = series.color.linear_multiply(alpha);
+                    
+                    // Add highlighting effect without changing base color
+                    if is_hovered {
+                        // Add a subtle border for highlighting
+                        let highlighted_points = Points::new(PlotPoints::from(vec![[point.x, point.y]]))
+                            .color(egui::Color32::WHITE)
+                            .radius(point_size * 1.8)
+                            .shape(marker_shape);
+                        plot_ui.points(highlighted_points);
+                    }
+                    
                     let points = Points::new(PlotPoints::from(vec![[point.x, point.y]]))
-                        .color(series.color.linear_multiply(alpha))
-                        .radius(point_size)
+                        .color(point_color)
+                        .radius(if is_hovered { point_size * 1.5 } else { point_size })
                         .shape(marker_shape);
                     plot_ui.points(points);
                 }
             }
         });
-
-        // Handle tooltips outside the closure to avoid borrow checker issues
+        
+        // Handle tooltips outside the closure
         if config.show_tooltips {
-            // Note: plot_ui is not available outside the closure
-            // We'll handle tooltips differently
+            if let Some((series_idx, point_idx, _)) = closest_point {
+                if let Some(series) = data.series.get(series_idx) {
+                    if let Some(point) = series.points.get(point_idx) {
+                        // Create comprehensive tooltip
+                        let mut tooltip_text = String::new();
+                        tooltip_text.push_str(&format!("Series: {}\n", series.name));
+                        tooltip_text.push_str(&format!("X: {:.3}\n", point.x));
+                        tooltip_text.push_str(&format!("Y: {:.3}\n", point.y));
+                        
+                        if let Some(size) = point.size {
+                            tooltip_text.push_str(&format!("Size: {:.1}\n", size));
+                        }
+                        
+                        // Add additional tooltip data
+                        for (key, value) in &point.tooltip_data {
+                            if key != "X" && key != "Y" && key != "Series" && key != "Size" {
+                                tooltip_text.push_str(&format!("{}: {}\n", key, value));
+                            }
+                        }
+                        
+                        // Show tooltip at pointer position
+                        if let Some(_pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            egui::show_tooltip_at_pointer(ui.ctx(), egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("scatter_tooltip")), egui::Id::new("scatter_tooltip"), |ui| {
+                                ui.label(tooltip_text);
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn render_legend(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
         if !data.series.is_empty() && config.show_legend {
             ui.group(|ui| {
+                // Show plot title
+                if !config.title.is_empty() {
+                    ui.label(RichText::new(&config.title).strong().size(16.0));
+                    ui.separator();
+                }
+                
+                // Show dataset info
+                let total_points: usize = data.series.iter().map(|s| s.points.len()).sum();
+                ui.label(RichText::new(format!("Dataset: {} points", total_points)).italics());
+                
+                // Performance warning for large datasets
+                if total_points > 100000 {
+                    ui.colored_label(egui::Color32::YELLOW, 
+                        "⚠ Large dataset - consider filtering for better performance");
+                }
+                
+                ui.separator();
                 ui.label(RichText::new("Series:").strong());
                 ui.separator();
                 
-                for series in &data.series {
+                // Sort series by name for consistent display
+                let mut sorted_series: Vec<_> = data.series.iter().collect();
+                sorted_series.sort_by(|a, b| a.name.cmp(&b.name));
+                
+                for series in &sorted_series {
                     let mut is_visible = series.visible;
                     if ui.checkbox(&mut is_visible, &series.name).changed() {
                         // Note: This would require mutable access to data
@@ -481,8 +594,32 @@ impl PlotTrait for ScatterPlot {
                         } else {
                             ui.label(&series.name);
                         }
+                        
+                        // Show point count for this series
+                        ui.label(RichText::new(format!("({} points)", series.points.len())).weak());
                     });
                 }
+                
+                // Show configuration details
+                ui.separator();
+                ui.label(RichText::new("Configuration:").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Marker Size:");
+                    ui.label(format!("{:.1}", config.marker_size));
+                });
+                // Get scatter plot specific config
+                let default_config;
+                let scatter_config = if let PlotSpecificConfig::ScatterPlot(cfg) = &config.plot_specific {
+                    cfg
+                } else {
+                    default_config = self.get_default_config();
+                    default_config.plot_specific.as_scatter_plot()
+                };
+                
+                ui.horizontal(|ui| {
+                    ui.label("Point Shape:");
+                    ui.label(format!("{:?}", scatter_config.point_shape));
+                });
                 
                 // Show enhanced statistics if available
                 if let Some(stats) = &data.statistics {

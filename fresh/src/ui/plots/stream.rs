@@ -136,6 +136,7 @@ impl PlotTrait for StreamPlot {
                 show_legend: config.show_legend,
                 show_grid: config.show_grid,
                 color_scheme: config.color_scheme.clone(),
+                extra_data: None,
             },
             statistics: Some(statistics),
         })

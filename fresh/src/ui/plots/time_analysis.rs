@@ -35,6 +35,15 @@ impl PlotTrait for TimeAnalysisPlot {
             return Err("X and Y columns are required for time series analysis".to_string());
         }
         
+        // For large datasets, sample the data
+        let max_points = 10000; // Limit for performance
+        let sample_size = query_result.rows.len().min(max_points);
+        let step = if query_result.rows.len() > max_points {
+            query_result.rows.len() / max_points
+        } else {
+            1
+        };
+        
         let x_idx = query_result.columns.iter().position(|c| c == &config.x_column)
             .ok_or("X column not found")?;
         let y_idx = query_result.columns.iter().position(|c| c == &config.y_column)
@@ -55,7 +64,7 @@ impl PlotTrait for TimeAnalysisPlot {
         let mut time_values = Vec::new();
         let mut y_values = Vec::new();
         
-        for (row_idx, row) in query_result.rows.iter().enumerate() {
+        for (row_idx, row) in query_result.rows.iter().enumerate().step_by(step) {
             if row.len() > x_idx && row.len() > y_idx {
                 // Parse time value
                 let time_val = if let Ok(timestamp) = row[x_idx].parse::<f64>() {
@@ -134,6 +143,7 @@ impl PlotTrait for TimeAnalysisPlot {
                 show_legend: config.show_legend,
                 show_grid: config.show_grid,
                 color_scheme: config.color_scheme.clone(),
+                extra_data: None,
             },
             statistics: Some(statistics),
         })
@@ -191,6 +201,10 @@ impl PlotTrait for TimeAnalysisPlot {
                     ui.label("Mean Value:");
                     ui.label(format!("{:.3}", stats.mean_y));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Trend Strength:");
+                    ui.label(format!("{:.3}", stats.correlation.unwrap_or(0.0).abs()));
+                });
             }
             
             ui.separator();
@@ -201,40 +215,77 @@ impl PlotTrait for TimeAnalysisPlot {
             
             ui.allocate_ui(plot_size, |ui| {
                 let plot = Plot::new("time_series")
-                    .height(plot_size.y)
-                    .allow_zoom(true)
-                    .allow_drag(true)
-                    .show_grid(true);
+                    .view_aspect(2.0)
+                    .include_y(0.0)
+                    .include_y(100.0);
                 
                 plot.show(ui, |plot_ui| {
-                    // Render time series line
                     render_time_series_line(plot_ui, data, config);
-                    
-                    // Render moving average
                     render_moving_average(plot_ui, data, config);
-                    
-                    // Render trend line
                     render_trend_line(plot_ui, data, config);
                 });
             });
             
-            // Controls
+            // Configuration panel
             ui.separator();
+            ui.label(RichText::new("Configuration").strong());
             ui.horizontal(|ui| {
                 ui.label("Analysis Type:");
-                ui.radio_value(&mut 0, 0, "Line");
-                ui.radio_value(&mut 0, 1, "Moving Average");
-                ui.radio_value(&mut 0, 2, "Trend");
-                ui.radio_value(&mut 0, 3, "All");
+                ui.radio_value(&mut 0, 0, "Trend");
+                ui.radio_value(&mut 0, 1, "Seasonality");
+                ui.radio_value(&mut 0, 2, "Decomposition");
             });
             
             ui.horizontal(|ui| {
-                ui.label("Window Size:");
-                ui.radio_value(&mut 0, 0, "5");
-                ui.radio_value(&mut 0, 1, "10");
-                ui.radio_value(&mut 0, 2, "20");
+                ui.label("Show Moving Average:");
+                ui.checkbox(&mut true, "");
+            });
+            
+            ui.horizontal(|ui| {
+                ui.label("Show Trend Line:");
+                ui.checkbox(&mut true, "");
             });
         });
+    }
+    
+    fn render_legend(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
+        if !data.series.is_empty() && config.show_legend {
+            ui.group(|ui| {
+                ui.label(RichText::new("Time Series Components:").strong());
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::BLUE, "●");
+                    ui.label("Original Data");
+                });
+                
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::RED, "●");
+                    ui.label("Moving Average");
+                });
+                
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::GREEN, "●");
+                    ui.label("Trend Line");
+                });
+            });
+        }
+    }
+    
+    fn handle_interaction(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) -> Option<super::PlotInteraction> {
+        // Handle hover and selection for time series
+        if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+            for point in &data.points {
+                let point_pos = Pos2::new(point.x as f32, point.y as f32);
+                if (hover_pos - point_pos).length() < 10.0 {
+                    // Show tooltip
+                    ui.label(format!("Time: {:.3} | Value: {:.3}", point.x, point.y));
+                    break;
+                }
+            }
+        }
+        
+        None
     }
 }
 

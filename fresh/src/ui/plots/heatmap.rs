@@ -317,6 +317,7 @@ impl PlotTrait for HeatmapPlot {
             show_legend: config.show_legend,
             show_grid: config.show_grid,
             color_scheme: config.color_scheme.clone(),
+            extra_data: None,
         };
         
         // Store matrix and labels in the first point's tooltip_data for later use

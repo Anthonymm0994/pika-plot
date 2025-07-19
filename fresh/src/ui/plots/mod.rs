@@ -19,7 +19,7 @@ pub mod heatmap;
 pub mod violin;
 pub mod anomaly;
 pub mod correlation;
-pub mod distribution;
+
 pub mod scatter3d;
 pub mod surface3d;
 pub mod contour;
@@ -102,15 +102,48 @@ pub trait Plot {
     /// Validate if the selected columns are appropriate for this plot type
     fn validate_columns(&self, query_result: &QueryResult, config: &PlotConfiguration) -> Result<(), String> {
         // Enhanced validation logic
-        if let Some(_required_x) = self.required_x_types() {
+        if let Some(required_x_types) = self.required_x_types() {
             if config.x_column.is_empty() {
                 return Err("X column is required for this plot type".to_string());
             }
-            // TODO: Check actual column type against required types
+            
+            // Check actual column type against required types
+            if let Some(x_idx) = query_result.columns.iter().position(|c| c == &config.x_column) {
+                if x_idx < query_result.column_types.len() {
+                    let actual_type = &query_result.column_types[x_idx];
+                    if !required_x_types.iter().any(|req_type| req_type == actual_type) {
+                        return Err(format!(
+                            "X column '{}' has type {:?} which is not valid for {} plot. Required types: {:?}",
+                            config.x_column, actual_type, self.name(), required_x_types
+                        ));
+                    }
+                }
+            }
+        } else {
+            // No X column required, but if one is provided, validate it's a valid column
+            if !config.x_column.is_empty() {
+                if !query_result.columns.contains(&config.x_column) {
+                    return Err(format!("X column '{}' not found in data", config.x_column));
+                }
+            }
         }
         
         if config.y_column.is_empty() {
             return Err("Y column is required for this plot type".to_string());
+        }
+        
+        // Check Y column type against required types
+        let required_y_types = self.required_y_types();
+        if let Some(y_idx) = query_result.columns.iter().position(|c| c == &config.y_column) {
+            if y_idx < query_result.column_types.len() {
+                let actual_type = &query_result.column_types[y_idx];
+                if !required_y_types.iter().any(|req_type| req_type == actual_type) {
+                    return Err(format!(
+                        "Y column '{}' has type {:?} which is not valid for {} plot. Required types: {:?}",
+                        config.y_column, actual_type, self.name(), required_y_types
+                    ));
+                }
+            }
         }
         
         // Validate optional columns
@@ -144,6 +177,7 @@ pub trait Plot {
                 show_legend: config.show_legend,
                 show_grid: config.show_grid,
                 color_scheme: config.color_scheme.clone(),
+                extra_data: None,
             },
             statistics: None,
         })
@@ -277,6 +311,7 @@ pub struct PlotMetadata {
     pub show_legend: bool,
     pub show_grid: bool,
     pub color_scheme: ColorScheme,
+    pub extra_data: Option<serde_json::Value>,
 }
 
 /// Statistical information about the data
@@ -373,48 +408,185 @@ pub enum PlotSpecificConfig {
     Histogram(HistogramConfig),
     BoxPlot(BoxPlotConfig),
     Violin(ViolinPlotConfig),
+    Heatmap(HeatmapConfig),
+    Anomaly(AnomalyConfig),
+    Correlation(CorrelationConfig),
+
+    Scatter3D(Scatter3DConfig),
+    Surface3D(Surface3DConfig),
+    Contour(ContourConfig),
+    ParallelCoordinates(ParallelCoordinatesConfig),
+    Radar(RadarConfig),
+    Sankey(SankeyConfig),
+    Treemap(TreemapConfig),
+    Sunburst(SunburstConfig),
+    Network(NetworkConfig),
+    Geo(GeoConfig),
+    TimeAnalysis(TimeAnalysisConfig),
+    Candlestick(CandlestickConfig),
+    Stream(StreamConfig),
+    Polar(PolarConfig),
 }
 
 impl PlotSpecificConfig {
     pub fn as_bar_chart(&self) -> &BarChartConfig {
         match self {
             PlotSpecificConfig::BarChart(config) => config,
-            _ => panic!("Expected BarChartConfig"),
+            _ => panic!("Expected BarChart config"),
         }
     }
     
     pub fn as_line_chart(&self) -> &LineChartConfig {
         match self {
             PlotSpecificConfig::LineChart(config) => config,
-            _ => panic!("Expected LineChartConfig"),
+            _ => panic!("Expected LineChart config"),
         }
     }
     
     pub fn as_scatter_plot(&self) -> &ScatterPlotConfig {
         match self {
             PlotSpecificConfig::ScatterPlot(config) => config,
-            _ => panic!("Expected ScatterPlotConfig"),
+            _ => panic!("Expected ScatterPlot config"),
         }
     }
     
     pub fn as_histogram(&self) -> &HistogramConfig {
         match self {
             PlotSpecificConfig::Histogram(config) => config,
-            _ => panic!("Expected HistogramConfig"),
+            _ => panic!("Expected Histogram config"),
         }
     }
     
     pub fn as_box_plot(&self) -> &BoxPlotConfig {
         match self {
             PlotSpecificConfig::BoxPlot(config) => config,
-            _ => panic!("Expected BoxPlotConfig"),
+            _ => panic!("Expected BoxPlot config"),
         }
     }
     
     pub fn as_violin(&self) -> &ViolinPlotConfig {
         match self {
             PlotSpecificConfig::Violin(config) => config,
-            _ => panic!("Expected ViolinPlotConfig"),
+            _ => panic!("Expected Violin config"),
+        }
+    }
+    
+    pub fn as_heatmap(&self) -> &HeatmapConfig {
+        match self {
+            PlotSpecificConfig::Heatmap(config) => config,
+            _ => panic!("Expected Heatmap config"),
+        }
+    }
+    
+    pub fn as_anomaly(&self) -> &AnomalyConfig {
+        match self {
+            PlotSpecificConfig::Anomaly(config) => config,
+            _ => panic!("Expected Anomaly config"),
+        }
+    }
+    
+    pub fn as_correlation(&self) -> &CorrelationConfig {
+        match self {
+            PlotSpecificConfig::Correlation(config) => config,
+            _ => panic!("Expected Correlation config"),
+        }
+    }
+    
+    pub fn as_scatter3d(&self) -> &Scatter3DConfig {
+        match self {
+            PlotSpecificConfig::Scatter3D(config) => config,
+            _ => panic!("Expected Scatter3D config"),
+        }
+    }
+    
+    pub fn as_surface3d(&self) -> &Surface3DConfig {
+        match self {
+            PlotSpecificConfig::Surface3D(config) => config,
+            _ => panic!("Expected Surface3D config"),
+        }
+    }
+    
+    pub fn as_contour(&self) -> &ContourConfig {
+        match self {
+            PlotSpecificConfig::Contour(config) => config,
+            _ => panic!("Expected Contour config"),
+        }
+    }
+    
+    pub fn as_parallel_coordinates(&self) -> &ParallelCoordinatesConfig {
+        match self {
+            PlotSpecificConfig::ParallelCoordinates(config) => config,
+            _ => panic!("Expected ParallelCoordinates config"),
+        }
+    }
+    
+    pub fn as_radar(&self) -> &RadarConfig {
+        match self {
+            PlotSpecificConfig::Radar(config) => config,
+            _ => panic!("Expected Radar config"),
+        }
+    }
+    
+    pub fn as_sankey(&self) -> &SankeyConfig {
+        match self {
+            PlotSpecificConfig::Sankey(config) => config,
+            _ => panic!("Expected Sankey config"),
+        }
+    }
+    
+    pub fn as_treemap(&self) -> &TreemapConfig {
+        match self {
+            PlotSpecificConfig::Treemap(config) => config,
+            _ => panic!("Expected Treemap config"),
+        }
+    }
+    
+    pub fn as_sunburst(&self) -> &SunburstConfig {
+        match self {
+            PlotSpecificConfig::Sunburst(config) => config,
+            _ => panic!("Expected Sunburst config"),
+        }
+    }
+    
+    pub fn as_network(&self) -> &NetworkConfig {
+        match self {
+            PlotSpecificConfig::Network(config) => config,
+            _ => panic!("Expected Network config"),
+        }
+    }
+    
+    pub fn as_geo(&self) -> &GeoConfig {
+        match self {
+            PlotSpecificConfig::Geo(config) => config,
+            _ => panic!("Expected Geo config"),
+        }
+    }
+    
+    pub fn as_time_analysis(&self) -> &TimeAnalysisConfig {
+        match self {
+            PlotSpecificConfig::TimeAnalysis(config) => config,
+            _ => panic!("Expected TimeAnalysis config"),
+        }
+    }
+    
+    pub fn as_candlestick(&self) -> &CandlestickConfig {
+        match self {
+            PlotSpecificConfig::Candlestick(config) => config,
+            _ => panic!("Expected Candlestick config"),
+        }
+    }
+    
+    pub fn as_stream(&self) -> &StreamConfig {
+        match self {
+            PlotSpecificConfig::Stream(config) => config,
+            _ => panic!("Expected Stream config"),
+        }
+    }
+    
+    pub fn as_polar(&self) -> &PolarConfig {
+        match self {
+            PlotSpecificConfig::Polar(config) => config,
+            _ => panic!("Expected Polar config"),
         }
     }
 }
@@ -426,6 +598,7 @@ pub struct BarChartConfig {
     pub group_spacing: f32,
     pub stacking_mode: StackingMode,
     pub sort_order: SortOrder,
+    pub orientation: BarOrientation,
 }
 
 impl Default for BarChartConfig {
@@ -435,6 +608,7 @@ impl Default for BarChartConfig {
             group_spacing: 0.2,
             stacking_mode: StackingMode::None,
             sort_order: SortOrder::None,
+            orientation: BarOrientation::Vertical,
         }
     }
 }
@@ -519,8 +693,19 @@ impl Default for BoxPlotConfig {
     }
 }
 
-/// Stacking modes for bar charts
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BarOrientation {
+    Vertical,
+    Horizontal,
+}
+
+impl Default for BarOrientation {
+    fn default() -> Self {
+        BarOrientation::Vertical
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum StackingMode {
     None,
     Stacked,
@@ -528,7 +713,7 @@ pub enum StackingMode {
 }
 
 /// Sort orders for categorical data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SortOrder {
     None,
     Ascending,
@@ -569,7 +754,6 @@ pub enum PlotType {
     // Statistical plots
     AnomalyDetection,
     CorrelationMatrix,
-    DistributionPlot,
     
     // 3D plots
     Scatter3D,
@@ -612,7 +796,6 @@ impl PlotType {
             PlotType::ViolinPlot => "Violin Plot",
             PlotType::AnomalyDetection => "Anomaly Detection",
             PlotType::CorrelationMatrix => "Correlation Matrix",
-            PlotType::DistributionPlot => "Distribution Plot",
             PlotType::Scatter3D => "3D Scatter Plot",
             PlotType::Surface3D => "3D Surface Plot",
             PlotType::ContourPlot => "Contour Plot",
@@ -644,7 +827,6 @@ impl PlotType {
             // Statistical plots
             PlotType::AnomalyDetection,
             PlotType::CorrelationMatrix,
-            PlotType::DistributionPlot,
             
             // 3D plots
             PlotType::Scatter3D,
@@ -691,7 +873,7 @@ impl PlotType {
             ("Statistical", vec![
                 PlotType::AnomalyDetection,
                 PlotType::CorrelationMatrix,
-                PlotType::DistributionPlot,
+    
             ]),
             ("3D Plots", vec![
                 PlotType::Scatter3D,
@@ -734,7 +916,7 @@ impl PlotType {
             
             // Plots that don't require X column
             PlotType::Histogram | PlotType::BoxPlot | PlotType::ViolinPlot |
-            PlotType::HeatMap | PlotType::CorrelationMatrix | PlotType::DistributionPlot |
+            PlotType::HeatMap | PlotType::CorrelationMatrix |
             PlotType::AnomalyDetection => None,
             
             // Default: require X column
@@ -748,7 +930,7 @@ impl PlotType {
             // Plots that require numeric Y
             PlotType::BarChart | PlotType::LineChart | PlotType::ScatterPlot |
             PlotType::Histogram | PlotType::BoxPlot | PlotType::ViolinPlot |
-            PlotType::HeatMap | PlotType::CorrelationMatrix | PlotType::DistributionPlot |
+            PlotType::HeatMap | PlotType::CorrelationMatrix |
             PlotType::AnomalyDetection | PlotType::Scatter3D | PlotType::Surface3D |
             PlotType::ContourPlot => {
                 vec![DataType::Int64, DataType::Float64]
@@ -788,7 +970,6 @@ impl PlotType {
             
             // Statistical plots have specific requirements
             PlotType::CorrelationMatrix => is_numeric_type(y_type),
-            PlotType::DistributionPlot => is_numeric_type(y_type),
             PlotType::AnomalyDetection => is_numeric_type(y_type),
             
             // Default: allow any types
@@ -947,9 +1128,511 @@ pub fn get_categorical_colors(scheme: &ColorScheme) -> Vec<Color32> {
 /// Re-export commonly used items
 pub use self::bar::BarChartPlot;
 pub use self::line::LineChartPlot;
-pub use self::scatter::ScatterPlotImpl;
+pub use self::scatter::{ScatterPlotImpl, ScatterPlot};
 pub use self::histogram::HistogramPlot;
 pub use self::box_plot::BoxPlotImpl;
 pub use self::data_processor::{DataProcessor, AnomalyMethod, BoxPlotStats};
 pub use self::heatmap::HeatmapPlot;
-pub use self::violin::{ViolinPlot, ViolinPlotConfig};
+pub use self::violin::ViolinPlot;
+pub use self::anomaly::AnomalyPlot;
+pub use self::correlation::CorrelationPlot;
+
+pub use self::scatter3d::Scatter3DPlot;
+pub use self::surface3d::Surface3dPlot;
+pub use self::contour::ContourPlot;
+pub use self::parallel_coordinates::ParallelCoordinatesPlot;
+pub use self::radar::RadarPlot;
+pub use self::sankey::SankeyPlot;
+pub use self::treemap::TreemapPlot;
+pub use self::sunburst::SunburstPlot;
+pub use self::network::NetworkPlot;
+pub use self::geo::GeoPlot;
+pub use self::time_analysis::TimeAnalysisPlot;
+pub use self::candlestick::CandlestickPlot;
+pub use self::stream::StreamPlot;
+pub use self::polar::PolarPlot;
+
+#[derive(Debug, Clone)]
+pub struct ViolinPlotConfig {
+    pub bandwidth: f32,
+    pub show_box_plot: bool,
+    pub show_mean: bool,
+    pub show_median: bool,
+    pub show_quartiles: bool,
+    pub show_outliers: bool,
+    pub violin_width: f32,
+    pub kde_points: usize,
+    pub comparison_mode: bool,
+    pub normalize_width: bool,
+    pub show_distribution_curve: bool,
+    pub show_points: bool,
+    pub point_alpha: f32,
+    pub orientation: Orientation,
+    pub scale: ViolinScale,
+}
+
+impl Default for ViolinPlotConfig {
+    fn default() -> Self {
+        Self {
+            bandwidth: 0.5,
+            show_box_plot: true,
+            show_mean: true,
+            show_median: true,
+            show_quartiles: true,
+            show_outliers: true,
+            violin_width: 0.8,
+            kde_points: 100,
+            comparison_mode: false,
+            normalize_width: true,
+            show_distribution_curve: false,
+            show_points: false,
+            point_alpha: 0.6,
+            orientation: Orientation::Vertical,
+            scale: ViolinScale::Width,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HeatmapConfig {
+    pub aggregation: AggregationMethod,
+    pub cell_size: f32,
+    pub show_values: bool,
+    pub color_scale: ColorScale,
+}
+
+impl Default for HeatmapConfig {
+    fn default() -> Self {
+        Self {
+            aggregation: AggregationMethod::Mean,
+            cell_size: 1.0,
+            show_values: false,
+            color_scale: ColorScale::Linear,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AnomalyConfig {
+    pub detection_method: AnomalyMethod,
+    pub threshold: f64,
+    pub window_size: usize,
+    pub show_normal_range: bool,
+}
+
+impl Default for AnomalyConfig {
+    fn default() -> Self {
+        Self {
+            detection_method: AnomalyMethod::IQR { multiplier: 1.5 },
+            threshold: 2.0,
+            window_size: 10,
+            show_normal_range: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CorrelationConfig {
+    pub method: CorrelationMethod,
+    pub show_p_values: bool,
+    pub significance_threshold: f64,
+    pub cluster_method: ClusterMethod,
+}
+
+impl Default for CorrelationConfig {
+    fn default() -> Self {
+        Self {
+            method: CorrelationMethod::Pearson,
+            show_p_values: false,
+            significance_threshold: 0.05,
+            cluster_method: ClusterMethod::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Scatter3DConfig {
+    pub point_size: f32,
+    pub show_axes: bool,
+    pub rotation_speed: f32,
+    pub projection: Projection3D,
+}
+
+impl Default for Scatter3DConfig {
+    fn default() -> Self {
+        Self {
+            point_size: 3.0,
+            show_axes: true,
+            rotation_speed: 1.0,
+            projection: Projection3D::Orthographic,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Surface3DConfig {
+    pub resolution: usize,
+    pub interpolation: InterpolationMethod,
+    pub show_wireframe: bool,
+    pub wireframe_alpha: f32,
+}
+
+impl Default for Surface3DConfig {
+    fn default() -> Self {
+        Self {
+            resolution: 50,
+            interpolation: InterpolationMethod::Linear,
+            show_wireframe: false,
+            wireframe_alpha: 0.3,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ContourConfig {
+    pub levels: usize,
+    pub smooth_contours: bool,
+    pub fill_contours: bool,
+    pub show_labels: bool,
+}
+
+impl Default for ContourConfig {
+    fn default() -> Self {
+        Self {
+            levels: 10,
+            smooth_contours: true,
+            fill_contours: true,
+            show_labels: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ParallelCoordinatesConfig {
+    pub show_axes_labels: bool,
+    pub line_alpha: f32,
+    pub axis_spacing: f32,
+    pub show_brush: bool,
+}
+
+impl Default for ParallelCoordinatesConfig {
+    fn default() -> Self {
+        Self {
+            show_axes_labels: true,
+            line_alpha: 0.7,
+            axis_spacing: 1.0,
+            show_brush: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RadarConfig {
+    pub show_axes: bool,
+    pub fill_area: bool,
+    pub area_alpha: f32,
+    pub max_value: Option<f64>,
+}
+
+impl Default for RadarConfig {
+    fn default() -> Self {
+        Self {
+            show_axes: true,
+            fill_area: false,
+            area_alpha: 0.3,
+            max_value: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SankeyConfig {
+    pub node_width: f32,
+    pub node_padding: f32,
+    pub link_alpha: f32,
+    pub show_values: bool,
+}
+
+impl Default for SankeyConfig {
+    fn default() -> Self {
+        Self {
+            node_width: 20.0,
+            node_padding: 10.0,
+            link_alpha: 0.6,
+            show_values: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TreemapConfig {
+    pub algorithm: TreemapAlgorithm,
+    pub padding: f32,
+    pub show_labels: bool,
+    pub label_threshold: usize,
+}
+
+impl Default for TreemapConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: TreemapAlgorithm::Squarified,
+            padding: 2.0,
+            show_labels: true,
+            label_threshold: 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SunburstConfig {
+    pub inner_radius: f32,
+    pub show_labels: bool,
+    pub label_threshold: f32,
+    pub animation_speed: f32,
+}
+
+impl Default for SunburstConfig {
+    fn default() -> Self {
+        Self {
+            inner_radius: 0.0,
+            show_labels: true,
+            label_threshold: 0.02,
+            animation_speed: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkConfig {
+    pub layout: NetworkLayout,
+    pub node_size: f32,
+    pub edge_width: f32,
+    pub show_labels: bool,
+    pub physics: bool,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            layout: NetworkLayout::ForceDirected,
+            node_size: 5.0,
+            edge_width: 1.0,
+            show_labels: false,
+            physics: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GeoConfig {
+    pub projection: GeoProjection,
+    pub show_coastlines: bool,
+    pub show_countries: bool,
+    pub color_by: GeoColorBy,
+}
+
+impl Default for GeoConfig {
+    fn default() -> Self {
+        Self {
+            projection: GeoProjection::Mercator,
+            show_coastlines: true,
+            show_countries: false,
+            color_by: GeoColorBy::Value,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeAnalysisConfig {
+    pub analysis_type: TimeAnalysisType,
+    pub window_size: usize,
+    pub show_trend: bool,
+    pub show_seasonality: bool,
+}
+
+impl Default for TimeAnalysisConfig {
+    fn default() -> Self {
+        Self {
+            analysis_type: TimeAnalysisType::Trend,
+            window_size: 10,
+            show_trend: true,
+            show_seasonality: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CandlestickConfig {
+    pub candle_width: f32,
+    pub show_volume: bool,
+    pub volume_alpha: f32,
+    pub show_indicators: bool,
+}
+
+impl Default for CandlestickConfig {
+    fn default() -> Self {
+        Self {
+            candle_width: 0.8,
+            show_volume: false,
+            volume_alpha: 0.5,
+            show_indicators: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamConfig {
+    pub interpolation: InterpolationMethod,
+    pub stack_order: StackOrder,
+    pub show_labels: bool,
+    pub label_threshold: f32,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            interpolation: InterpolationMethod::Linear,
+            stack_order: StackOrder::None,
+            show_labels: false,
+            label_threshold: 0.05,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PolarConfig {
+    pub radius_range: (f64, f64),
+    pub angle_range: (f64, f64),
+    pub show_grid: bool,
+    pub grid_alpha: f32,
+}
+
+impl Default for PolarConfig {
+    fn default() -> Self {
+        Self {
+            radius_range: (0.0, 1.0),
+            angle_range: (0.0, 2.0 * std::f64::consts::PI),
+            show_grid: true,
+            grid_alpha: 0.2,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Orientation {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Debug, Clone)]
+pub enum ViolinScale {
+    Count,
+    Width,
+    Area,
+}
+
+#[derive(Debug, Clone)]
+pub enum AggregationMethod {
+    Sum,
+    Mean,
+    Count,
+    Min,
+    Max,
+    Median,
+}
+
+#[derive(Debug, Clone)]
+pub enum ColorScale {
+    Linear,
+    Log,
+    SymLog,
+    Custom,
+}
+
+#[derive(Debug, Clone)]
+pub enum CorrelationMethod {
+    Pearson,
+    Spearman,
+    Kendall,
+}
+
+#[derive(Debug, Clone)]
+pub enum ClusterMethod {
+    None,
+    Hierarchical,
+    KMeans,
+}
+
+#[derive(Debug, Clone)]
+pub enum DistributionType {
+    Histogram,
+    KDE,
+    Box,
+    Violin,
+}
+
+#[derive(Debug, Clone)]
+pub enum BandwidthMethod {
+    Silverman,
+    Scott,
+    Manual,
+}
+
+#[derive(Debug, Clone)]
+pub enum Projection3D {
+    Orthographic,
+    Perspective,
+}
+
+#[derive(Debug, Clone)]
+pub enum InterpolationMethod {
+    Linear,
+    Cubic,
+    Nearest,
+}
+
+#[derive(Debug, Clone)]
+pub enum StackOrder {
+    None,
+    Ascending,
+    Descending,
+    InsideOut,
+    OutsideIn,
+}
+
+#[derive(Debug, Clone)]
+pub enum NetworkLayout {
+    ForceDirected,
+    Circular,
+    Hierarchical,
+    Random,
+}
+
+#[derive(Debug, Clone)]
+pub enum GeoProjection {
+    Mercator,
+    Albers,
+    Orthographic,
+}
+
+#[derive(Debug, Clone)]
+pub enum GeoColorBy {
+    Value,
+    Category,
+    Density,
+}
+
+#[derive(Debug, Clone)]
+pub enum TimeAnalysisType {
+    Trend,
+    Seasonality,
+    Decomposition,
+    Forecasting,
+}
+
+#[derive(Debug, Clone)]
+pub enum TreemapAlgorithm {
+    Squarified,
+    Slice,
+    Dice,
+}

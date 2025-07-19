@@ -89,16 +89,37 @@ impl CorrelationPlot {
         }
     }
     
-    /// Get color for correlation value
+    /// Get color for correlation value using a more sophisticated color scheme
     fn get_correlation_color(&self, correlation: f64) -> Color32 {
-        // Use a diverging color scheme: red for negative, blue for positive
+        // Use a more sophisticated diverging color scheme
         let abs_corr = correlation.abs();
-        let intensity = (abs_corr * 255.0) as u8;
         
         if correlation < 0.0 {
-            Color32::from_rgb(intensity, 0, 0) // Red for negative
+            // Negative correlations: Cool colors (blues to purples)
+            if abs_corr > 0.8 {
+                Color32::from_rgb(49, 54, 149) // Dark blue
+            } else if abs_corr > 0.6 {
+                Color32::from_rgb(69, 117, 180) // Medium blue
+            } else if abs_corr > 0.4 {
+                Color32::from_rgb(116, 173, 209) // Light blue
+            } else if abs_corr > 0.2 {
+                Color32::from_rgb(171, 217, 233) // Very light blue
+            } else {
+                Color32::from_rgb(224, 243, 248) // Almost white
+            }
         } else {
-            Color32::from_rgb(0, 0, intensity) // Blue for positive
+            // Positive correlations: Warm colors (yellows to reds)
+            if abs_corr > 0.8 {
+                Color32::from_rgb(165, 0, 38) // Dark red
+            } else if abs_corr > 0.6 {
+                Color32::from_rgb(215, 48, 39) // Medium red
+            } else if abs_corr > 0.4 {
+                Color32::from_rgb(244, 109, 67) // Light red
+            } else if abs_corr > 0.2 {
+                Color32::from_rgb(253, 174, 97) // Orange
+            } else {
+                Color32::from_rgb(254, 224, 144) // Light yellow
+            }
         }
     }
 }
@@ -191,6 +212,7 @@ impl PlotTrait for CorrelationPlot {
                 show_legend: true,
                 show_grid: false,
                 color_scheme: ColorScheme::Viridis,
+                extra_data: None,
             },
             statistics: None,
         })
@@ -215,15 +237,15 @@ impl PlotTrait for CorrelationPlot {
             .allow_boxed_zoom(config.allow_zoom);
         
         plot.show(ui, |plot_ui| {
-            // Render correlation matrix as colored squares
+            // Render correlation matrix as colored squares with improved styling
             for point in &data.points {
                 let x = point.x;
                 let y = point.y;
                 if let Some(correlation) = point.z {
                     let color = self.get_correlation_color(correlation);
-                    let size = correlation.abs() * 0.8 + 0.2; // Scale size by correlation strength
+                    let size = 0.9; // Fixed size for cleaner appearance
                     
-                    // Create a square for each correlation value
+                    // Create a rounded square for each correlation value
                     let half_size = size / 2.0;
                     let square_points = vec![
                         [x - half_size, y - half_size],
@@ -232,38 +254,105 @@ impl PlotTrait for CorrelationPlot {
                         [x - half_size, y + half_size],
                     ];
                     
+                    // Use softer stroke color
+                    let stroke_color = if correlation.abs() > 0.5 {
+                        Color32::from_gray(80)
+                    } else {
+                        Color32::from_gray(120)
+                    };
+                    
                     let square = Polygon::new(square_points)
                         .fill_color(color)
-                        .stroke(Stroke::new(1.0, Color32::from_gray(100)))
+                        .stroke(Stroke::new(0.5, stroke_color))
                         .name(format!("{:.3}", correlation));
                     
                     plot_ui.polygon(square);
                     
-                    // Add correlation value as text
-                    if correlation.abs() > 0.3 {
+                    // Add correlation value as text with better contrast
+                    if correlation.abs() > 0.4 {
+                        let text_color = if correlation.abs() > 0.7 {
+                            Color32::WHITE
+                        } else if correlation.abs() > 0.5 {
+                            Color32::from_gray(30)
+                        } else {
+                            Color32::from_gray(60)
+                        };
+                        
                         plot_ui.text(Text::new(
                             PlotPoint::new(x, y),
                             RichText::new(format!("{:.2}", correlation))
-                                .size(10.0)
-                                .color(if correlation.abs() > 0.7 { Color32::WHITE } else { Color32::BLACK })
+                                .size(9.0)
+                                .color(text_color)
                         ));
                     }
                 }
             }
         });
         
-        // Add correlation interpretation
-        ui.collapsing("Correlation Analysis", |ui| {
-            ui.label(RichText::new("Correlation Interpretation:").strong());
-            ui.label("• Red: Negative correlation");
-            ui.label("• Blue: Positive correlation");
-            ui.label("• Darker colors: Stronger correlation");
-            ui.label("• Lighter colors: Weaker correlation");
+        // Add comprehensive correlation interpretation
+        ui.collapsing("Correlation Matrix Guide", |ui| {
+            ui.label(RichText::new("Color Interpretation:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(165, 0, 38), "■");
+                ui.label("Strong Positive (>0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(215, 48, 39), "■");
+                ui.label("Moderate Positive (0.6-0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(244, 109, 67), "■");
+                ui.label("Weak Positive (0.4-0.6)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(253, 174, 97), "■");
+                ui.label("Very Weak Positive (0.2-0.4)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(254, 224, 144), "■");
+                ui.label("Negligible (<0.2)");
+            });
+            
             ui.separator();
-            ui.label(RichText::new("Strength Guide:").strong());
-            ui.label("• |r| > 0.7: Strong correlation");
-            ui.label("• 0.3 < |r| < 0.7: Moderate correlation");
-            ui.label("• |r| < 0.3: Weak correlation");
+            
+            ui.label(RichText::new("Negative Correlations:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(49, 54, 149), "■");
+                ui.label("Strong Negative (>0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(69, 117, 180), "■");
+                ui.label("Moderate Negative (0.6-0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(116, 173, 209), "■");
+                ui.label("Weak Negative (0.4-0.6)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(171, 217, 233), "■");
+                ui.label("Very Weak Negative (0.2-0.4)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(224, 243, 248), "■");
+                ui.label("Negligible (<0.2)");
+            });
+            
+            ui.separator();
+            
+            ui.label(RichText::new("Key Features:").strong());
+            ui.label("• Diagonal values are always 1.0 (perfect self-correlation)");
+            ui.label("• Matrix is symmetric (top-right mirrors bottom-left)");
+            ui.label("• Values range from -1.0 to +1.0");
+            ui.label("• Only numeric columns are included in analysis");
+            
+            ui.separator();
+            
+            ui.label(RichText::new("Interpretation Guide:").strong());
+            ui.label("• |r| > 0.8: Very strong correlation");
+            ui.label("• 0.6 < |r| < 0.8: Strong correlation");
+            ui.label("• 0.4 < |r| < 0.6: Moderate correlation");
+            ui.label("• 0.2 < |r| < 0.4: Weak correlation");
+            ui.label("• |r| < 0.2: Negligible correlation");
         });
     }
     
@@ -272,16 +361,54 @@ impl PlotTrait for CorrelationPlot {
             ui.label(RichText::new("Correlation Matrix Legend").strong());
             ui.separator();
             
-            // Show color scale
+            ui.label(RichText::new("Positive Correlations:").strong());
             ui.horizontal(|ui| {
-                ui.label("Negative:");
-                ui.colored_label(Color32::RED, "■");
-                ui.label("Positive:");
-                ui.colored_label(Color32::BLUE, "■");
+                ui.colored_label(Color32::from_rgb(165, 0, 38), "■");
+                ui.label("Strong (>0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(215, 48, 39), "■");
+                ui.label("Moderate (0.6-0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(244, 109, 67), "■");
+                ui.label("Weak (0.4-0.6)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(253, 174, 97), "■");
+                ui.label("Very Weak (0.2-0.4)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(254, 224, 144), "■");
+                ui.label("Negligible (<0.2)");
             });
             
-            ui.label("Darker colors indicate stronger correlations");
-            ui.label("Diagonal values are always 1.0 (perfect correlation)");
+            ui.separator();
+            
+            ui.label(RichText::new("Negative Correlations:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(49, 54, 149), "■");
+                ui.label("Strong (>0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(69, 117, 180), "■");
+                ui.label("Moderate (0.6-0.8)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(116, 173, 209), "■");
+                ui.label("Weak (0.4-0.6)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(171, 217, 233), "■");
+                ui.label("Very Weak (0.2-0.4)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(224, 243, 248), "■");
+                ui.label("Negligible (<0.2)");
+            });
+            
+            ui.separator();
+            ui.label("Diagonal values are always 1.0 (perfect self-correlation)");
         });
     }
     

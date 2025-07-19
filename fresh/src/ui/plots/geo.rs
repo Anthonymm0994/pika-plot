@@ -34,6 +34,15 @@ impl PlotTrait for GeoPlot {
             return Err("X and Y columns are required for geographic plots".to_string());
         }
         
+        // For large datasets, sample the data
+        let max_points = 5000; // Limit for performance
+        let sample_size = query_result.rows.len().min(max_points);
+        let step = if query_result.rows.len() > max_points {
+            query_result.rows.len() / max_points
+        } else {
+            1
+        };
+        
         let x_idx = query_result.columns.iter().position(|c| c == &config.x_column)
             .ok_or("X column not found")?;
         let y_idx = query_result.columns.iter().position(|c| c == &config.y_column)
@@ -53,7 +62,7 @@ impl PlotTrait for GeoPlot {
         let mut points = Vec::new();
         let mut geo_data = Vec::new();
         
-        for (row_idx, row) in query_result.rows.iter().enumerate() {
+        for (row_idx, row) in query_result.rows.iter().enumerate().step_by(step) {
             if row.len() > x_idx && row.len() > y_idx {
                 // Parse longitude (X) value
                 let lon_val = row[x_idx].parse::<f64>()
@@ -137,6 +146,7 @@ impl PlotTrait for GeoPlot {
                 show_legend: config.show_legend,
                 show_grid: config.show_grid,
                 color_scheme: config.color_scheme.clone(),
+                extra_data: None,
             },
             statistics: Some(statistics),
         })
@@ -206,8 +216,9 @@ impl PlotTrait for GeoPlot {
                 render_geo_plot(ui, data, config, plot_size);
             });
             
-            // Controls
+            // Configuration panel
             ui.separator();
+            ui.label(RichText::new("Configuration").strong());
             ui.horizontal(|ui| {
                 ui.label("Projection:");
                 ui.radio_value(&mut 0, 0, "Mercator");
@@ -216,12 +227,53 @@ impl PlotTrait for GeoPlot {
             });
             
             ui.horizontal(|ui| {
-                ui.label("Display Mode:");
-                ui.radio_value(&mut 0, 0, "Points");
-                ui.radio_value(&mut 0, 1, "Heatmap");
-                ui.radio_value(&mut 0, 2, "Both");
+                ui.label("Show Grid:");
+                ui.checkbox(&mut true, "");
+            });
+            
+            ui.horizontal(|ui| {
+                ui.label("Show Labels:");
+                ui.checkbox(&mut true, "");
             });
         });
+    }
+    
+    fn render_legend(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) {
+        if !data.series.is_empty() && config.show_legend {
+            ui.group(|ui| {
+                ui.label(RichText::new("Geographic Points:").strong());
+                ui.separator();
+                
+                for (i, point) in data.points.iter().take(10).enumerate() {
+                    ui.horizontal(|ui| {
+                        if let Some(color) = point.color {
+                            ui.colored_label(color, "●");
+                        }
+                        ui.label(format!("Point {}", i + 1));
+                    });
+                }
+                
+                if data.points.len() > 10 {
+                    ui.label(format!("... and {} more points", data.points.len() - 10));
+                }
+            });
+        }
+    }
+    
+    fn handle_interaction(&self, ui: &mut Ui, data: &PlotData, config: &PlotConfiguration) -> Option<super::PlotInteraction> {
+        // Handle hover and selection for geographic plot
+        if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+            for point in &data.points {
+                let point_pos = Pos2::new(point.x as f32, point.y as f32);
+                if (hover_pos - point_pos).length() < 10.0 {
+                    // Show tooltip
+                    ui.label(format!("Longitude: {:.3}° | Latitude: {:.3}°", point.x, point.y));
+                    break;
+                }
+            }
+        }
+        
+        None
     }
 }
 

@@ -16,6 +16,7 @@ use super::{
     DataSeries,
     SeriesStyle,
     PlotMetadata,
+    BarOrientation,
     data_processor::DataProcessor
 };
 
@@ -81,12 +82,14 @@ impl BarChartPlot {
                     })
                     .sum();
                 
-                // Calculate x position with offset for grouped bars
+                // Calculate x position for grouped bars
+                // Each category gets its own x position, and groups are offset within that position
+                let base_x = cat_idx as f64;
                 let group_count = groups.len() as f64;
                 let bar_width = bar_config.bar_width as f64;
                 let group_spacing = bar_config.group_spacing as f64;
                 let total_width = group_count * bar_width + (group_count - 1.0) * group_spacing;
-                let start_x = cat_idx as f64 - total_width / 2.0 + bar_width / 2.0;
+                let start_x = base_x - total_width / 2.0 + bar_width / 2.0;
                 let x = start_x + (group_idx as f64) * (bar_width + group_spacing);
                 
                 // Create tooltip data
@@ -381,7 +384,32 @@ impl BarChartPlot {
         }
         
         let mut categories_vec: Vec<String> = categories.into_iter().collect();
-        categories_vec.sort();
+        
+        // Try to sort categories intelligently
+        if categories_vec.iter().any(|c| c.parse::<f64>().is_ok()) {
+            // If all categories are numeric, sort numerically
+            categories_vec.sort_by(|a, b| {
+                a.parse::<f64>().unwrap_or(0.0)
+                    .partial_cmp(&b.parse::<f64>().unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        } else if categories_vec.iter().any(|c| c.contains('-') && c.contains(':')) {
+            // If categories look like timestamps, try to sort chronologically
+            categories_vec.sort_by(|a, b| {
+                if let (Ok(ts_a), Ok(ts_b)) = (
+                    chrono::NaiveDateTime::parse_from_str(a, "%Y-%m-%d %H:%M:%S"),
+                    chrono::NaiveDateTime::parse_from_str(b, "%Y-%m-%d %H:%M:%S")
+                ) {
+                    ts_a.cmp(&ts_b)
+                } else {
+                    a.cmp(b)
+                }
+            });
+        } else {
+            // Default alphabetical sort
+            categories_vec.sort();
+        }
+        
         Ok(categories_vec)
     }
     
@@ -478,6 +506,7 @@ impl BarChartPlot {
         // Create a single series
         let mut points = Vec::new();
         let colors = super::get_categorical_colors(&config.color_scheme);
+        let series_color = colors[0]; // Use first color for the series
         
         for (cat_idx, category) in categories.iter().enumerate() {
             // Filter data for this category
@@ -510,7 +539,7 @@ impl BarChartPlot {
                 y: sum,
                 z: None,
                 label: Some(category.clone()),
-                color: Some(colors[0]),
+                color: Some(series_color), // Use consistent color for all bars
                 size: None,
                 series_id: Some("main".to_string()),
                 tooltip_data,
@@ -522,7 +551,7 @@ impl BarChartPlot {
             id: "main".to_string(),
             name: "Bars".to_string(),
             points,
-            color: colors[0],
+            color: series_color, // Set series color
             visible: true,
             style: SeriesStyle::Bars { width: bar_config.bar_width },
         };
@@ -538,9 +567,10 @@ impl BarChartPlot {
             // Use a simple default instead of static
             &BarChartConfig {
                 bar_width: 0.8,
-                group_spacing: 0.1,
+                group_spacing: 0.2,
                 stacking_mode: StackingMode::None,
                 sort_order: SortOrder::None,
+                orientation: BarOrientation::Vertical,
             }
         }
     }
@@ -583,10 +613,11 @@ impl PlotTrait for BarChartPlot {
     fn get_default_config(&self) -> PlotConfiguration {
         let mut config = PlotConfiguration::default();
         config.plot_specific = PlotSpecificConfig::BarChart(BarChartConfig {
-            bar_width: 0.7,
+            bar_width: 0.8,
             group_spacing: 0.2,
             stacking_mode: StackingMode::None,
             sort_order: SortOrder::None,
+            orientation: BarOrientation::Vertical,
         });
         config
     }
@@ -636,6 +667,7 @@ impl PlotTrait for BarChartPlot {
             show_legend: config.show_legend,
             show_grid: config.show_grid,
             color_scheme: config.color_scheme.clone(),
+            extra_data: None,
         };
         
         // Flatten points for backward compatibility
@@ -656,12 +688,27 @@ impl PlotTrait for BarChartPlot {
             return;
         };
 
+        // Performance optimization: limit points for large datasets
+        let max_points = 10000; // Limit for performance
+        let mut total_points = 0;
+        for series in &data.series {
+            total_points += series.points.len();
+        }
+        
+        if total_points > max_points {
+            ui.colored_label(egui::Color32::YELLOW, 
+                format!("⚠ Large dataset detected ({} points). Consider filtering data for better performance.", total_points));
+        }
+
         // Create plot with proper configuration
         let mut plot = Plot::new("bar_chart")
             .allow_zoom(config.allow_zoom)
             .allow_drag(config.allow_pan)
             .show_grid(config.show_grid)
-            .legend(Legend::default().position(egui_plot::Corner::RightBottom));
+            .legend(Legend::default()
+                .position(egui_plot::Corner::RightBottom)
+                .background_alpha(0.8)
+                .text_style(egui::TextStyle::Small));
 
         // Add axis labels if enabled
         if config.show_axes_labels {
@@ -670,48 +717,109 @@ impl PlotTrait for BarChartPlot {
                 .y_axis_label(config.y_column.clone());
         }
 
-        // Add title if provided
-        if !config.title.is_empty() {
-            // Note: egui_plot doesn't have a title method, we'll handle this differently
-        }
-
+        // Track hover state for highlighting
+        let mut hovered_bar: Option<(usize, usize)> = None; // (series_idx, point_idx)
+        
         plot.show(ui, |plot_ui| {
-            for series in &data.series {
+            // Render each series as a separate BarChart
+            for (series_idx, series) in data.series.iter().enumerate() {
                 if !series.visible {
                     continue;
                 }
-
-                for point in &series.points {
-                    let bar_width = if let SeriesStyle::Bars { width } = series.style {
-                        width as f64
+                
+                // Create bars for this series
+                let mut bars = Vec::new();
+                for (point_idx, point) in series.points.iter().enumerate() {
+                    let bar_width = if let SeriesStyle::Bars { width } = &series.style {
+                        *width as f64
                     } else {
-                        0.8
+                        bar_config.bar_width as f64
                     };
-
+                    
+                    // Check if this bar is being hovered
+                    let is_hovered = if let Some(pointer_coord) = plot_ui.pointer_coordinate() {
+                        let half_width = bar_width / 2.0;
+                        pointer_coord.x >= point.x - half_width && 
+                        pointer_coord.x <= point.x + half_width &&
+                        pointer_coord.y >= 0.0 && pointer_coord.y <= point.y
+                    } else {
+                        false
+                    };
+                    
+                    // Set hover state
+                    if is_hovered {
+                        hovered_bar = Some((series_idx, point_idx));
+                    }
+                    
+                    // Use original color for consistency with legend
+                    let bar_color = point.color.unwrap_or(series.color);
+                    
                     let mut bar = Bar::new(point.x, point.y)
                         .width(bar_width)
-                        .fill(series.color);
-
+                        .fill(bar_color);
+                    
+                    // Enhanced highlighting effect
+                    if is_hovered {
+                        // Use a subtle glow effect instead of harsh white outline
+                        let glow_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60);
+                        bar = bar.stroke(egui::Stroke::new(2.0, glow_color));
+                        
+                        // Add a subtle brightness increase
+                        let brightened_color = brighten_color(bar_color, 0.2);
+                        bar = bar.fill(brightened_color);
+                    }
+                    
                     // Handle stacked bars
                     if let Some(base_value) = point.z {
                         bar = bar.base_offset(base_value);
                     }
-
-                    // Note: plot_ui.bar() is not available in this version
-                    // We'll use bar_chart instead
-                    let chart = BarChart::new(vec![bar])
-                        .name(&series.name)
-                        .color(series.color);
                     
-                    plot_ui.bar_chart(chart);
+                    bars.push(bar);
                 }
+                
+                // Create BarChart for this series
+                let chart = BarChart::new(bars)
+                    .name(&series.name);
+                
+                plot_ui.bar_chart(chart);
             }
         });
-
-        // Handle tooltips
+        
+        // Enhanced tooltip handling
         if config.show_tooltips {
-            // Note: plot_ui is not available outside the closure
-            // We'll handle tooltips differently
+            if let Some((series_idx, point_idx)) = hovered_bar {
+                if let Some(series) = data.series.get(series_idx) {
+                    if let Some(point) = series.points.get(point_idx) {
+                        // Create comprehensive tooltip with better formatting
+                        let mut tooltip_text = String::new();
+                        tooltip_text.push_str(&format!("**Series:** {}\n", series.name));
+                        tooltip_text.push_str(&format!("**Value:** {:.2}\n", point.y));
+                        
+                        if let Some(label) = &point.label {
+                            // Try to format timestamp if it looks like one
+                            let formatted_label = format_timestamp_label(label);
+                            tooltip_text.push_str(&format!("**Category:** {}\n", formatted_label));
+                        }
+                        
+                        // Add additional tooltip data with better formatting
+                        for (key, value) in &point.tooltip_data {
+                            if key != "Value" && key != "Category" && key != "Series" {
+                                tooltip_text.push_str(&format!("**{}:** {}\n", key, value));
+                            }
+                        }
+                        
+                        // Show enhanced tooltip at pointer position
+                        if let Some(_pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            egui::show_tooltip_at_pointer(ui.ctx(), egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("bar_tooltip")), egui::Id::new("bar_tooltip"), |ui| {
+                                // Use a styled tooltip with better colors
+                                ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+                                
+                                ui.label(egui::RichText::new(tooltip_text).monospace());
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -727,6 +835,24 @@ impl PlotTrait for BarChartPlot {
                     default_config.plot_specific.as_bar_chart()
                 };
                 
+                // Show plot title
+                if !config.title.is_empty() {
+                    ui.label(RichText::new(&config.title).strong().size(16.0));
+                    ui.separator();
+                }
+                
+                // Show dataset info
+                let total_points: usize = data.series.iter().map(|s| s.points.len()).sum();
+                ui.label(RichText::new(format!("Dataset: {} points", total_points)).italics());
+                
+                // Performance warning for large datasets
+                if total_points > 10000 {
+                    ui.colored_label(egui::Color32::YELLOW, 
+                        "⚠ Large dataset - consider filtering for better performance");
+                }
+                
+                ui.separator();
+                
                 // Determine if we're showing series or categories in the legend
                 let has_multiple_series = data.series.len() > 1;
                 
@@ -735,7 +861,11 @@ impl PlotTrait for BarChartPlot {
                     ui.label(RichText::new("Series:").strong());
                     ui.separator();
                     
-                    for series in &data.series {
+                    // Sort series by name for consistent display
+                    let mut sorted_series: Vec<_> = data.series.iter().collect();
+                    sorted_series.sort_by(|a, b| a.name.cmp(&b.name));
+                    
+                    for series in &sorted_series {
                         let mut is_checked = series.visible;
                         if ui.checkbox(&mut is_checked, &series.name).changed() {
                             // TODO: Handle toggling series visibility
@@ -746,6 +876,9 @@ impl PlotTrait for BarChartPlot {
                         ui.horizontal(|ui| {
                             ui.colored_label(series.color, "■■■");
                             ui.label(&series.name);
+                            
+                            // Show point count for this series
+                            ui.label(RichText::new(format!("({} bars)", series.points.len())).weak());
                         });
                     }
                     
@@ -754,12 +887,18 @@ impl PlotTrait for BarChartPlot {
                         StackingMode::Stacked => {
                             ui.separator();
                             ui.label(RichText::new("Stacked Bar Chart").italics());
+                            ui.label("Bars are stacked on top of each other");
                         },
                         StackingMode::Percent => {
                             ui.separator();
                             ui.label(RichText::new("Percentage Stacked Bar Chart").italics());
+                            ui.label("Bars show percentage contribution");
                         },
-                        _ => {}
+                        _ => {
+                            ui.separator();
+                            ui.label(RichText::new("Grouped Bar Chart").italics());
+                            ui.label("Bars are grouped side by side");
+                        }
                     }
                 } else {
                     // For simple bars, show categories
@@ -786,12 +925,26 @@ impl PlotTrait for BarChartPlot {
                     
                     categories.sort_by(|a, b| a.0.cmp(&b.0));
                     
+                    // Limit display for large datasets
+                    let max_categories = 20;
+                    let display_categories = if categories.len() > max_categories {
+                        &categories[..max_categories]
+                    } else {
+                        &categories
+                    };
+                    
                     // Display categories
-                    for (label, color) in categories {
+                    for (label, color) in display_categories {
                         ui.horizontal(|ui| {
-                            ui.colored_label(color, "■■■");
-                            ui.label(&label);
+                            ui.colored_label(*color, "■■■");
+                            ui.label(&*label);
                         });
+                    }
+                    
+                    // Show warning if too many categories
+                    if categories.len() > max_categories {
+                        ui.colored_label(egui::Color32::YELLOW, 
+                            format!("... and {} more categories", categories.len() - max_categories));
                     }
                     
                     // Add sorting info if applicable
@@ -810,6 +963,23 @@ impl PlotTrait for BarChartPlot {
                         },
                         _ => {}
                     }
+                }
+                
+                // Show orientation info
+                ui.separator();
+                match bar_config.orientation {
+                    BarOrientation::Vertical => {
+                        ui.label(RichText::new("Orientation: Vertical").weak());
+                    },
+                    BarOrientation::Horizontal => {
+                        ui.label(RichText::new("Orientation: Horizontal").weak());
+                    }
+                }
+                
+                // Show configuration details
+                ui.label(RichText::new(format!("Bar Width: {:.1}", bar_config.bar_width)).weak());
+                if bar_config.group_spacing > 0.0 {
+                    ui.label(RichText::new(format!("Group Spacing: {:.1}", bar_config.group_spacing)).weak());
                 }
             });
         }
@@ -839,4 +1009,36 @@ impl PlotTrait for BarChartPlot {
         
         None
     }
+}
+
+/// Helper function to brighten a color
+fn brighten_color(color: Color32, factor: f32) -> Color32 {
+    let r = (color.r() as f32 * (1.0 + factor)).min(255.0) as u8;
+    let g = (color.g() as f32 * (1.0 + factor)).min(255.0) as u8;
+    let b = (color.b() as f32 * (1.0 + factor)).min(255.0) as u8;
+    Color32::from_rgb(r, g, b)
+}
+
+/// Helper function to format timestamp labels
+fn format_timestamp_label(label: &str) -> String {
+    // Try to parse as timestamp and format nicely
+    if label.contains('-') && label.contains(':') {
+        // Looks like a timestamp, try to format it
+        if let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(label, "%Y-%m-%d %H:%M:%S") {
+            return timestamp.format("%Y-%m-%d %H:%M").to_string();
+        } else if let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(label, "%Y-%m-%d %H:%M:%S%.f") {
+            return timestamp.format("%Y-%m-%d %H:%M").to_string();
+        }
+    }
+    
+    // If it's a numeric timestamp, try to convert
+    if let Ok(timestamp) = label.parse::<f64>() {
+        // Assume it's a Unix timestamp
+        if let Some(datetime) = chrono::DateTime::from_timestamp(timestamp as i64, 0) {
+            return datetime.format("%Y-%m-%d %H:%M").to_string();
+        }
+    }
+    
+    // Return original if no formatting applies
+    label.to_string()
 }

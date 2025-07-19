@@ -292,6 +292,7 @@ pub fn get_categorical_colors(scheme: &ColorScheme) -> Vec<Color32> {
             Color32::from_rgb(255, 237, 111),  // Very light yellow
         ],
         _ => vec![
+            // Enhanced default scheme with better contrast for bar charts
             Color32::from_rgb(31, 119, 180),   // Blue
             Color32::from_rgb(255, 127, 14),   // Orange
             Color32::from_rgb(44, 160, 44),    // Green
@@ -302,6 +303,11 @@ pub fn get_categorical_colors(scheme: &ColorScheme) -> Vec<Color32> {
             Color32::from_rgb(127, 127, 127),  // Gray
             Color32::from_rgb(188, 189, 34),   // Olive
             Color32::from_rgb(23, 190, 207),   // Cyan
+            Color32::from_rgb(255, 187, 120),  // Light orange
+            Color32::from_rgb(174, 199, 232),  // Light blue
+            Color32::from_rgb(255, 152, 150),  // Light red
+            Color32::from_rgb(152, 223, 138),  // Light green
+            Color32::from_rgb(197, 176, 213),  // Light purple
         ],
     }
 }

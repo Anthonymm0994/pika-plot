@@ -105,8 +105,8 @@ impl BoxPlotImpl {
         // TODO: Implement highlighted box plot rendering
     }
     
-    /// Process data for box plot with proper grouping
-    async fn process_data(&self, query_result: &crate::core::QueryResult, config: &PlotConfiguration) -> Result<(Vec<DataSeries>, HashMap<String, BoxPlotStats>), String> {
+    /// Process data for box plot with proper grouping (synchronous version)
+    fn process_data_sync(&self, query_result: &crate::core::QueryResult, config: &PlotConfiguration) -> Result<(Vec<DataSeries>, HashMap<String, BoxPlotStats>), String> {
         let data_processor = DataProcessor::new();
         
         // Get box plot specific config
@@ -127,12 +127,12 @@ impl BoxPlotImpl {
             None
         };
         
-        // Calculate box plot statistics
-        let stats_list = data_processor.compute_box_plot_stats(
+        // Calculate box plot statistics synchronously
+        let stats_list = self.compute_box_plot_stats_sync(
             query_result,
             &config.y_column,
             group_by
-        ).await?;
+        )?;
         
         // Create a map of group name to stats for tooltips
         let mut stats_map = HashMap::new();
@@ -277,6 +277,97 @@ impl BoxPlotImpl {
         Ok((all_series, stats_map))
     }
     
+    /// Compute box plot statistics synchronously
+    fn compute_box_plot_stats_sync(
+        &self,
+        query_result: &crate::core::QueryResult,
+        y_column: &str,
+        group_by: Option<&str>
+    ) -> Result<Vec<BoxPlotStats>, String> {
+        // Extract Y column data
+        let y_idx = query_result.columns.iter().position(|c| c == y_column)
+            .ok_or_else(|| format!("Y column '{}' not found", y_column))?;
+        
+        let mut grouped_data: HashMap<String, Vec<f64>> = HashMap::new();
+        
+        // Collect data by group
+        for row in &query_result.rows {
+            if row.len() > y_idx {
+                if let Ok(y_val) = row[y_idx].parse::<f64>() {
+                    let group_name = if let Some(group_col) = group_by {
+                        if let Some(group_idx) = query_result.columns.iter().position(|c| c == group_col) {
+                            if row.len() > group_idx {
+                                row[group_idx].clone()
+                            } else {
+                                "Unknown".to_string()
+                            }
+                        } else {
+                            "Unknown".to_string()
+                        }
+                    } else {
+                        "All Data".to_string()
+                    };
+                    
+                    grouped_data.entry(group_name).or_insert_with(Vec::new).push(y_val);
+                }
+            }
+        }
+        
+        // Calculate statistics for each group
+        let mut stats_list = Vec::new();
+        for (group_name, values) in grouped_data {
+            if values.is_empty() {
+                continue;
+            }
+            
+            let mut sorted_values = values.clone();
+            sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            
+            let n = sorted_values.len();
+            let min = sorted_values[0];
+            let max = sorted_values[n - 1];
+            
+            // Calculate quartiles
+            let q1_idx = n / 4;
+            let median_idx = n / 2;
+            let q3_idx = 3 * n / 4;
+            
+            let q1 = sorted_values[q1_idx];
+            let median = sorted_values[median_idx];
+            let q3 = sorted_values[q3_idx];
+            
+            // Calculate mean
+            let mean = values.iter().sum::<f64>() / values.len() as f64;
+            
+            // Calculate IQR and fences for outliers
+            let iqr = q3 - q1;
+            let lower_fence = q1 - 1.5 * iqr;
+            let upper_fence = q3 + 1.5 * iqr;
+            
+            // Find outliers
+            let outliers: Vec<f64> = values.iter()
+                .filter(|&&x| x < lower_fence || x > upper_fence)
+                .cloned()
+                .collect();
+            
+            stats_list.push(BoxPlotStats {
+                group: Some(group_name),
+                min,
+                q1,
+                median,
+                q3,
+                max,
+                mean,
+                count: values.len(),
+                outliers,
+                lower_fence,
+                upper_fence,
+            });
+        }
+        
+        Ok(stats_list)
+    }
+    
     /// Helper method to get box plot specific config
     fn as_box_plot_config(config: &PlotConfiguration) -> &BoxPlotConfig {
         if let PlotSpecificConfig::BoxPlot(cfg) = &config.plot_specific {
@@ -410,10 +501,8 @@ impl PlotTrait for BoxPlotImpl {
     }
     
     fn prepare_data(&self, query_result: &crate::core::QueryResult, config: &PlotConfiguration) -> Result<PlotData, String> {
-        // Use tokio runtime to run async data processing
-        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
-        
-        let (series, stats_map) = rt.block_on(self.process_data(query_result, config))?;
+        // Process data synchronously
+        let (series, stats_map) = self.process_data_sync(query_result, config)?;
         
         // Create plot metadata
         let x_label = if !config.x_column.is_empty() {
@@ -429,6 +518,7 @@ impl PlotTrait for BoxPlotImpl {
             show_legend: config.show_legend,
             show_grid: config.show_grid,
             color_scheme: config.color_scheme.clone(),
+            extra_data: None,
         };
         
         // Flatten points for backward compatibility

@@ -328,6 +328,7 @@ impl PlotTrait for AnomalyPlot {
                 show_legend: true,
                 show_grid: true,
                 color_scheme: ColorScheme::Viridis,
+                extra_data: None,
             },
             statistics: Some(super::DataStatistics {
                 mean_x: 0.0,
@@ -355,7 +356,8 @@ impl PlotTrait for AnomalyPlot {
             .show_grid(config.show_grid)
             .allow_zoom(config.allow_zoom)
             .allow_drag(config.allow_pan)
-            .allow_boxed_zoom(config.allow_zoom);
+            .allow_boxed_zoom(config.allow_zoom)
+            .legend(egui_plot::Legend::default());
         
         plot.show(ui, |plot_ui| {
             // Render normal data points
@@ -363,15 +365,18 @@ impl PlotTrait for AnomalyPlot {
                 .filter(|p| p.series_id.as_ref().map_or(false, |id| id == "normal"))
                 .collect();
             
-            for point in normal_points {
-                let x = point.x;
-                let y = point.y;
-                let normal_points = Points::new(vec![[x, y]])
-                    .color(point.color.unwrap_or(Color32::from_rgb(100, 150, 255)))
-                    .radius(4.0)
-                    .shape(egui_plot::MarkerShape::Circle);
+            if !normal_points.is_empty() {
+                let normal_coords: Vec<[f64; 2]> = normal_points.iter()
+                    .map(|p| [p.x, p.y])
+                    .collect();
                 
-                plot_ui.points(normal_points);
+                let normal_series = Points::new(normal_coords)
+                    .color(Color32::from_rgb(100, 150, 255))
+                    .radius(4.0)
+                    .shape(egui_plot::MarkerShape::Circle)
+                    .name("Normal Data");
+                
+                plot_ui.points(normal_series);
             }
             
             // Render anomaly points
@@ -379,24 +384,71 @@ impl PlotTrait for AnomalyPlot {
                 .filter(|p| p.series_id.as_ref().map_or(false, |id| id == "anomaly"))
                 .collect();
             
-            for point in anomaly_points {
-                let x = point.x;
-                let y = point.y;
-                let anomaly_points = Points::new(vec![[x, y]])
-                    .color(point.color.unwrap_or(Color32::from_rgb(255, 100, 100)))
-                    .radius(8.0)
-                    .shape(egui_plot::MarkerShape::Cross);
+            if !anomaly_points.is_empty() {
+                let anomaly_coords: Vec<[f64; 2]> = anomaly_points.iter()
+                    .map(|p| [p.x, p.y])
+                    .collect();
                 
-                plot_ui.points(anomaly_points);
+                let anomaly_series = Points::new(anomaly_coords)
+                    .color(Color32::from_rgb(255, 100, 100))
+                    .radius(8.0)
+                    .shape(egui_plot::MarkerShape::Cross)
+                    .name("Anomalies");
+                
+                plot_ui.points(anomaly_series);
             }
         });
         
-        // Show anomaly summary
+        // Show comprehensive legend and summary
         let anomaly_count = data.points.iter()
             .filter(|p| p.series_id.as_ref().map_or(false, |id| id == "anomaly"))
             .count();
         
-        ui.collapsing("Anomaly Summary", |ui| {
+        ui.collapsing("Anomaly Detection Legend & Summary", |ui| {
+            // Data series section
+            ui.label(RichText::new("Data Series:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(100, 150, 255), "●");
+                ui.label("Normal Data Points");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 100, 100), "✚");
+                ui.label("Anomaly Points");
+            });
+            
+            ui.separator();
+            
+            // Severity levels section
+            ui.label(RichText::new("Anomaly Severity Levels:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 255, 0), "●");
+                ui.label("Low (|z| > 2.0) - Minor deviations");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 165, 0), "●");
+                ui.label("Medium (|z| > 2.5) - Moderate outliers");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 69, 0), "●");
+                ui.label("High (|z| > 3.0) - Significant outliers");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 0, 0), "●");
+                ui.label("Critical (|z| > 3.5) - Extreme outliers");
+            });
+            
+            ui.separator();
+            
+            // Detection methods section
+            ui.label(RichText::new("Detection Methods:").strong());
+            ui.label("• Z-Score: Statistical outliers based on standard deviations");
+            ui.label("• IQR: Quartile-based outliers using interquartile range");
+            ui.label("• Moving Average: Temporal anomalies in time series data");
+            
+            ui.separator();
+            
+            // Summary statistics
+            ui.label(RichText::new("Summary Statistics:").strong());
             ui.horizontal(|ui| {
                 ui.label("Total Data Points:");
                 ui.label(format!("{}", data.points.len()));
@@ -410,30 +462,17 @@ impl PlotTrait for AnomalyPlot {
                 ui.label(format!("{:.2}%", (anomaly_count as f64 / data.points.len() as f64) * 100.0));
             });
             
-            ui.separator();
-            ui.label(RichText::new("Detection Methods:").strong());
-            ui.label("• Z-Score (|z| > 2.0)");
-            ui.label("• IQR (Q1 - 1.5×IQR, Q3 + 1.5×IQR)");
-            ui.label("• Moving Average (window=5, threshold=2.0)");
-            
-            ui.separator();
-            ui.label(RichText::new("Severity Levels:").strong());
-            ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(255, 255, 0), "●");
-                ui.label("Low");
-            });
-            ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(255, 165, 0), "●");
-                ui.label("Medium");
-            });
-            ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(255, 69, 0), "●");
-                ui.label("High");
-            });
-            ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(255, 0, 0), "●");
-                ui.label("Critical");
-            });
+            // Additional statistics if available
+            if let Some(stats) = &data.statistics {
+                ui.horizontal(|ui| {
+                    ui.label("Mean Value:");
+                    ui.label(format!("{:.2}", stats.mean_y));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Standard Deviation:");
+                    ui.label(format!("{:.2}", stats.std_y));
+                });
+            }
         });
     }
     
@@ -442,6 +481,8 @@ impl PlotTrait for AnomalyPlot {
             ui.label(RichText::new("Anomaly Detection Legend").strong());
             ui.separator();
             
+            // Data series
+            ui.label(RichText::new("Data Series:").strong());
             for series in &data.series {
                 let mut is_visible = series.visible;
                 if ui.checkbox(&mut is_visible, &series.name).changed() {
@@ -470,6 +511,53 @@ impl PlotTrait for AnomalyPlot {
                     }
                 });
             }
+            
+            ui.separator();
+            
+            // Severity levels
+            ui.label(RichText::new("Anomaly Severity:").strong());
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 255, 0), "●");
+                ui.label("Low (|z| > 2.0)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 165, 0), "●");
+                ui.label("Medium (|z| > 2.5)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 69, 0), "●");
+                ui.label("High (|z| > 3.0)");
+            });
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(255, 0, 0), "●");
+                ui.label("Critical (|z| > 3.5)");
+            });
+            
+            ui.separator();
+            
+            // Detection methods
+            ui.label(RichText::new("Detection Methods:").strong());
+            ui.label("• Z-Score: Statistical outliers");
+            ui.label("• IQR: Quartile-based outliers");
+            ui.label("• Moving Average: Temporal anomalies");
+            
+            // Statistics if available
+            if let Some(stats) = &data.statistics {
+                ui.separator();
+                ui.label(RichText::new("Statistics:").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Mean:");
+                    ui.label(format!("{:.2}", stats.mean_y));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Std Dev:");
+                    ui.label(format!("{:.2}", stats.std_y));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Total Points:");
+                    ui.label(format!("{}", stats.count));
+                });
+            }
         });
     }
     
@@ -477,3 +565,4 @@ impl PlotTrait for AnomalyPlot {
         None
     }
 }
+

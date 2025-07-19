@@ -8,6 +8,35 @@ use std::f64::consts::PI;
 
 pub struct RadarPlot;
 
+impl RadarPlot {
+    /// Convert HSV to RGB
+    fn hsv_to_rgb(&self, h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+        let c = v * s;
+        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+        let m = v - c;
+        
+        let (r, g, b) = if h < 60.0 {
+            (c, x, 0.0)
+        } else if h < 120.0 {
+            (x, c, 0.0)
+        } else if h < 180.0 {
+            (0.0, c, x)
+        } else if h < 240.0 {
+            (0.0, x, c)
+        } else if h < 300.0 {
+            (x, 0.0, c)
+        } else {
+            (c, 0.0, x)
+        };
+        
+        (
+            ((r + m) * 255.0).clamp(0.0, 255.0) as u8,
+            ((g + m) * 255.0).clamp(0.0, 255.0) as u8,
+            ((b + m) * 255.0).clamp(0.0, 255.0) as u8,
+        )
+    }
+}
+
 impl PlotTrait for RadarPlot {
     fn name(&self) -> &'static str {
         "Radar Chart"
@@ -32,32 +61,69 @@ impl PlotTrait for RadarPlot {
     fn supports_multiple_series(&self) -> bool { true }
     
     fn prepare_data(&self, query_result: &QueryResult, config: &PlotConfiguration) -> Result<PlotData, String> {
+        // For radar charts, we need multiple numeric columns
+        // We'll use the Y column as the primary column and find other numeric columns
         if config.y_column.is_empty() {
             return Err("At least one Y column is required for radar charts".to_string());
         }
         
-        // For radar charts, we need multiple dimensions
-        let selected_columns = vec![&config.y_column];
-        let mut all_columns = selected_columns.clone();
-        
-        if let Some(color_col) = &config.color_column {
-            if !color_col.is_empty() {
-                all_columns.push(color_col);
-            }
-        }
-        
-        if let Some(size_col) = &config.size_column {
-            if !size_col.is_empty() {
-                all_columns.push(size_col);
-            }
-        }
-        
-        // Get column indices
+        // Find all numeric columns for radar chart
+        let mut numeric_columns = Vec::new();
         let mut column_indices = Vec::new();
-        for col in &all_columns {
-            let idx = query_result.columns.iter().position(|c| c == *col)
-                .ok_or_else(|| format!("Column '{}' not found", col))?;
+        
+        // Start with the Y column
+        if let Some(idx) = query_result.columns.iter().position(|c| c == &config.y_column) {
+            numeric_columns.push(&config.y_column);
             column_indices.push(idx);
+        } else {
+            return Err(format!("Column '{}' not found", config.y_column));
+        }
+        
+        // Find additional numeric columns (up to 8 total for readability)
+        for (i, col) in query_result.columns.iter().enumerate() {
+            if numeric_columns.len() >= 8 {
+                break; // Limit to 8 dimensions for readability
+            }
+            
+            if col != &config.y_column && !numeric_columns.contains(&col) {
+                // Check if this column contains numeric data
+                let mut has_numeric_data = false;
+                for row in &query_result.rows {
+                    if row.len() > i {
+                        if row[i].parse::<f64>().is_ok() {
+                            has_numeric_data = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if has_numeric_data {
+                    numeric_columns.push(col);
+                    column_indices.push(i);
+                }
+            }
+        }
+        
+        if numeric_columns.len() < 3 {
+            return Err("Need at least 3 numeric columns for radar chart".to_string());
+        }
+        
+        // Calculate min/max for each column for normalization
+        let mut column_ranges = Vec::new();
+        for &col_idx in &column_indices {
+            let mut min_val = f64::INFINITY;
+            let mut max_val = f64::NEG_INFINITY;
+            
+            for row in &query_result.rows {
+                if row.len() > col_idx {
+                    if let Ok(val) = row[col_idx].parse::<f64>() {
+                        min_val = min_val.min(val);
+                        max_val = max_val.max(val);
+                    }
+                }
+            }
+            
+            column_ranges.push((min_val, max_val));
         }
         
         let mut points = Vec::new();
@@ -68,12 +134,22 @@ impl PlotTrait for RadarPlot {
                 let mut point_data = Vec::new();
                 let mut tooltip_data = HashMap::new();
                 
-                // Extract values for each column
+                // Extract and normalize values for each column
                 for (i, &col_idx) in column_indices.iter().enumerate() {
                     if row.len() > col_idx {
                         let value = row[col_idx].parse::<f64>().unwrap_or(0.0);
-                        point_data.push(value);
-                        tooltip_data.insert(query_result.columns[col_idx].clone(), row[col_idx].clone());
+                        let (min_val, max_val) = column_ranges[i];
+                        let range = max_val - min_val;
+                        
+                        // Normalize to 0-1 range
+                        let normalized = if range > 0.0 {
+                            (value - min_val) / range
+                        } else {
+                            0.5
+                        };
+                        
+                        point_data.push(normalized);
+                        tooltip_data.insert(query_result.columns[col_idx].clone(), format!("{:.3}", value));
                     } else {
                         point_data.push(0.0);
                     }
@@ -113,7 +189,10 @@ impl PlotTrait for RadarPlot {
                         Color32::BLUE
                     }
                 } else {
-                    Color32::BLUE
+                    // Use a gradient based on row index
+                    let hue = (row_idx as f32 * 137.5) % 360.0; // Golden angle
+                    let (r, g, b) = self.hsv_to_rgb(hue, 0.8, 0.9);
+                    Color32::from_rgb(r, g, b)
                 };
                 
                 points.push(PlotPoint {
@@ -131,17 +210,28 @@ impl PlotTrait for RadarPlot {
             }
         }
         
+        // Store the column information in metadata for rendering
+        let mut metadata = super::PlotMetadata {
+            title: config.title.clone(),
+            x_label: "Dimensions".to_string(),
+            y_label: "Values".to_string(),
+            show_legend: config.show_legend,
+            show_grid: config.show_grid,
+            color_scheme: config.color_scheme.clone(),
+            extra_data: None,
+        };
+        
+        // Store additional data for radar chart
+        metadata.extra_data = Some(serde_json::json!({
+            "columns": numeric_columns,
+            "column_ranges": column_ranges,
+            "series_data": series_data
+        }));
+        
         Ok(PlotData {
             points,
             series: vec![],
-            metadata: super::PlotMetadata {
-                title: config.title.clone(),
-                x_label: "Dimensions".to_string(),
-                y_label: "Values".to_string(),
-                show_legend: config.show_legend,
-                show_grid: config.show_grid,
-                color_scheme: config.color_scheme.clone(),
-            },
+            metadata,
             statistics: None,
         })
     }
@@ -203,9 +293,74 @@ fn render_radar_chart(ui: &mut Ui, data: &PlotData, _config: &PlotConfiguration,
     let center = Pos2::new(size.x / 2.0, size.y / 2.0);
     let radius = (size.x.min(size.y) / 2.0 - 50.0).max(50.0);
     
-    // Define dimensions (simplified - in real implementation, this would come from config)
-    let dimensions = vec!["Speed", "Power", "Range", "Accuracy", "Durability"];
-    let num_dimensions = dimensions.len();
+    // Extract column information from metadata
+    let columns = if let Some(extra_data) = &data.metadata.extra_data {
+        if let Some(cols) = extra_data.get("columns") {
+            if let Some(col_array) = cols.as_array() {
+                col_array.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+    
+    let column_ranges = if let Some(extra_data) = &data.metadata.extra_data {
+        if let Some(ranges) = extra_data.get("column_ranges") {
+            if let Some(range_array) = ranges.as_array() {
+                range_array.iter()
+                    .filter_map(|v| {
+                        if let Some(arr) = v.as_array() {
+                            if arr.len() == 2 {
+                                Some((arr[0].as_f64().unwrap_or(0.0), arr[1].as_f64().unwrap_or(1.0)))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+    
+    let series_data = if let Some(extra_data) = &data.metadata.extra_data {
+        if let Some(series) = extra_data.get("series_data") {
+            if let Some(series_array) = series.as_array() {
+                series_array.iter()
+                    .filter_map(|v| {
+                        if let Some(arr) = v.as_array() {
+                            Some(arr.iter()
+                                .filter_map(|val| val.as_f64())
+                                .collect::<Vec<_>>())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+    
+    let num_dimensions = columns.len();
     
     if num_dimensions < 3 {
         ui.centered_and_justified(|ui| {
@@ -218,35 +373,31 @@ fn render_radar_chart(ui: &mut Ui, data: &PlotData, _config: &PlotConfiguration,
     draw_radar_grid(ui, center, radius, num_dimensions);
     
     // Draw dimension labels
-    draw_radar_labels(ui, center, radius, &dimensions);
+    draw_radar_labels(ui, center, radius, &columns);
     
     // Draw data polygons
     for (point_idx, point) in data.points.iter().enumerate() {
         let color = point.color.unwrap_or(Color32::BLUE);
         
-        // Generate sample data for demonstration
-        let values = vec![
-            (point_idx as f64 * 0.1 + 0.3) % 1.0,
-            (point_idx as f64 * 0.2 + 0.5) % 1.0,
-            (point_idx as f64 * 0.3 + 0.7) % 1.0,
-            (point_idx as f64 * 0.4 + 0.4) % 1.0,
-            (point_idx as f64 * 0.5 + 0.6) % 1.0,
-        ];
-        
-        // Draw radar polygon
-        draw_radar_polygon(ui, center, radius, &values, color);
+        if point_idx < series_data.len() {
+            let values = &series_data[point_idx];
+            
+            // Draw radar polygon
+            draw_radar_polygon(ui, center, radius, values, color);
+        }
     }
 }
 
 /// Draw radar grid (concentric circles and radial lines)
 fn draw_radar_grid(ui: &mut Ui, center: Pos2, radius: f32, num_dimensions: usize) {
-    // Draw concentric circles
+    // Draw concentric circles with different opacities
     for i in 1..=5 {
         let circle_radius = radius * i as f32 / 5.0;
+        let alpha = (255 - (i * 40)) as u8;
         ui.painter().circle_stroke(
             center,
             circle_radius,
-            Stroke::new(1.0, Color32::from_gray(200)),
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(150, 150, 150, alpha)),
         );
     }
     
@@ -258,9 +409,12 @@ fn draw_radar_grid(ui: &mut Ui, center: Pos2, radius: f32, num_dimensions: usize
         
         ui.painter().line_segment(
             [center, Pos2::new(end_x, end_y)],
-            Stroke::new(1.0, Color32::from_gray(200)),
+            Stroke::new(1.0, Color32::from_gray(120)),
         );
     }
+    
+    // Draw center point
+    ui.painter().circle_filled(center, 3.0, Color32::WHITE);
 }
 
 /// Draw dimension labels around the radar
@@ -272,12 +426,19 @@ fn draw_radar_labels(ui: &mut Ui, center: Pos2, radius: f32, dimensions: &[&str]
         let x = center.x + (label_radius * angle.cos() as f32);
         let y = center.y + (label_radius * angle.sin() as f32);
         
+        // Truncate long labels to prevent overlap
+        let display_label = if dimension.len() > 12 {
+            &dimension[..12]
+        } else {
+            dimension
+        };
+        
         ui.painter().text(
             Pos2::new(x, y),
             egui::Align2::CENTER_CENTER,
-            dimension,
-            egui::FontId::proportional(12.0),
-            Color32::BLACK,
+            display_label,
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
         );
     }
 }
@@ -300,11 +461,14 @@ fn draw_radar_polygon(ui: &mut Ui, center: Pos2, radius: f32, values: &[f64], co
         polygon_points.push(Pos2::new(x, y));
     }
     
-    // Draw filled polygon
+    // Draw filled polygon with alpha
     if polygon_points.len() >= 3 {
+        let fill_color = Color32::from_rgba_unmultiplied(
+            color.r(), color.g(), color.b(), 80
+        );
         ui.painter().add(egui::Shape::convex_polygon(
             polygon_points.clone(),
-            color.linear_multiply(0.3),
+            fill_color,
             Stroke::new(2.0, color),
         ));
     }
@@ -317,17 +481,34 @@ fn draw_radar_polygon(ui: &mut Ui, center: Pos2, radius: f32, values: &[f64], co
             
             ui.painter().line_segment(
                 [start, end],
-                Stroke::new(2.0, color),
+                Stroke::new(2.5, color),
             );
         }
     }
     
-    // Draw vertices
+    // Draw vertices with enhanced styling
     for &point in &polygon_points {
+        // Outer glow
+        ui.painter().circle_filled(
+            point,
+            6.0,
+            Color32::from_rgba_unmultiplied(
+                color.r(), color.g(), color.b(), 60
+            ),
+        );
+        
+        // Inner core
         ui.painter().circle_filled(
             point,
             4.0,
             color,
+        );
+        
+        // Highlight
+        ui.painter().circle_stroke(
+            point,
+            4.0,
+            Stroke::new(1.0, Color32::WHITE),
         );
     }
 }
