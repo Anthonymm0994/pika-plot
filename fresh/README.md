@@ -126,6 +126,15 @@ let config = PlotConfiguration {
 - **Performance Tests**: Large dataset handling
 - **Validation Tests**: Data processing accuracy
 
+### Test Datasets
+The project includes comprehensive test datasets in the `test_data/` directory:
+
+- **Small Dataset** (`test_complex.csv`): ~50 rows for quick testing
+- **Medium Dataset** (`test_medium_complex_full.csv`): ~10,000 rows for comprehensive testing
+- **Large Dataset** (`test_large_complex.csv`): ~100,000 rows for performance testing
+
+All datasets include realistic data patterns, null values, garbage lines, and mixed data types to thoroughly test CSV import functionality.
+
 ### Test Results
 ```
 running 11 tests

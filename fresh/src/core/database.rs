@@ -4,10 +4,11 @@ use std::sync::Arc;
 use datafusion::prelude::*;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
-use datafusion::arrow::array::{StringArray, Int64Array, Float64Array, BooleanArray};
+use datafusion::arrow::array::{StringArray, Int64Array, Float64Array, BooleanArray, Date32Array, TimestampNanosecondArray, TimestampSecondArray, TimestampMillisecondArray, TimestampMicrosecondArray};
 use datafusion::arrow::datatypes::TimeUnit;
 use tokio::runtime::Runtime;
 use crate::core::error::{Result, FreshError};
+use crate::infer::{TypeInferrer, ColumnType};
 
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
@@ -69,6 +70,70 @@ impl Drop for Database {
 }
 
 impl Database {
+    fn parse_csv_line(line: &str, delimiter: char) -> Vec<String> {
+        let mut row = Vec::new();
+        let mut current_field = String::new();
+        let mut in_quotes = false;
+        let mut chars = line.chars().peekable();
+        
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' => {
+                    if in_quotes {
+                        // End of quoted field
+                        in_quotes = false;
+                    } else {
+                        // Start of quoted field
+                        in_quotes = true;
+                    }
+                },
+                c if c == delimiter && !in_quotes => {
+                    // End of field
+                    row.push(current_field.trim().to_string());
+                    current_field.clear();
+                },
+                _ => {
+                    current_field.push(ch);
+                }
+            }
+        }
+        
+        // Add the last field
+        row.push(current_field.trim().to_string());
+        row
+    }
+
+    fn parse_date_string(date_str: &str) -> Option<i32> {
+        // Parse date in YYYY-MM-DD format
+        let parts: Vec<&str> = date_str.split('-').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        
+        let year: i32 = parts[0].parse().ok()?;
+        let month: u32 = parts[1].parse().ok()?;
+        let day: u32 = parts[2].parse().ok()?;
+        
+        // Validate date
+        if month < 1 || month > 12 || day < 1 || day > 31 {
+            return None;
+        }
+        
+        // Convert to days since epoch (1970-01-01)
+        // This is a simplified conversion - in production you'd want a proper date library
+        let days_since_epoch = (year - 1970) * 365 + (year - 1969) / 4; // Approximate leap year calculation
+        
+        // Add days for months (simplified)
+        let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut days_in_year: i32 = 0;
+        for i in 1..month {
+            days_in_year += month_days[i as usize];
+        }
+        days_in_year += (day - 1) as i32;
+        
+        Some(days_since_epoch + days_in_year)
+    }
+
     pub fn open_readonly<P: AsRef<Path>>(_path: P) -> Result<Self> {
         // DataFusion is in-memory, so we don't need file paths for now
         let runtime = Runtime::new()
@@ -337,6 +402,93 @@ impl Database {
                 let bool_array = array.as_any().downcast_ref::<BooleanArray>().unwrap();
                 Ok(bool_array.value(index).to_string())
             }
+            DataType::Timestamp(unit, _) => {
+                // Handle timestamp arrays
+                match unit {
+                    TimeUnit::Second => {
+                        let timestamp_array = array.as_any().downcast_ref::<TimestampSecondArray>().unwrap();
+                        if timestamp_array.is_null(index) {
+                            Ok("".to_string())
+                        } else {
+                            let timestamp = timestamp_array.value(index);
+                            // Convert seconds since epoch to readable format
+                            match chrono::DateTime::from_timestamp(timestamp, 0) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                                None => Ok("Invalid timestamp".to_string())
+                            }
+                        }
+                    }
+                    TimeUnit::Millisecond => {
+                        let timestamp_array = array.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
+                        if timestamp_array.is_null(index) {
+                            Ok("".to_string())
+                        } else {
+                            let timestamp = timestamp_array.value(index);
+                            // Convert milliseconds to seconds for chrono
+                            let seconds = timestamp / 1_000;
+                            match chrono::DateTime::from_timestamp(seconds, 0) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                                None => Ok("Invalid timestamp".to_string())
+                            }
+                        }
+                    }
+                    TimeUnit::Microsecond => {
+                        let timestamp_array = array.as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
+                        if timestamp_array.is_null(index) {
+                            Ok("".to_string())
+                        } else {
+                            let timestamp = timestamp_array.value(index);
+                            // Convert microseconds to seconds for chrono
+                            let seconds = timestamp / 1_000_000;
+                            match chrono::DateTime::from_timestamp(seconds, 0) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                                None => Ok("Invalid timestamp".to_string())
+                            }
+                        }
+                    }
+                    TimeUnit::Nanosecond => {
+                        let timestamp_array = array.as_any().downcast_ref::<TimestampNanosecondArray>().unwrap();
+                        if timestamp_array.is_null(index) {
+                            Ok("".to_string())
+                        } else {
+                            let timestamp = timestamp_array.value(index);
+                            // Convert nanoseconds to seconds for chrono
+                            let seconds = timestamp / 1_000_000_000;
+                            match chrono::DateTime::from_timestamp(seconds, 0) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                                None => Ok("Invalid timestamp".to_string())
+                            }
+                        }
+                    }
+                }
+            }
+            DataType::Date32 => {
+                let date_array = array.as_any().downcast_ref::<Date32Array>().unwrap();
+                if date_array.is_null(index) {
+                    Ok("".to_string())
+                } else {
+                    let days = date_array.value(index);
+                    // Convert days since epoch (1970-01-01) to readable date
+                    // This is a simplified conversion - in production you'd want a proper date library
+                    let year = 1970 + (days / 365);
+                    let remaining_days = days % 365;
+                    
+                    // Simplified month/day calculation
+                    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                    let mut month = 1;
+                    let mut day = remaining_days;
+                    
+                    for &days_in_month in &month_days[1..] {
+                        if day < days_in_month {
+                            break;
+                        }
+                        day -= days_in_month;
+                        month += 1;
+                    }
+                    
+                    Ok(format!("{:04}-{:02}-{:02}", year, month, day + 1))
+                }
+            }
             _ => {
                 // For other types, convert to string representation
                 Ok(format!("{:?}", array))
@@ -422,6 +574,179 @@ impl Database {
                 }
                 let array = StringArray::from(string_values);
                 arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+            }
+        }
+        
+        Ok(arrays)
+    }
+
+    fn string_rows_to_arrow_arrays_with_schema(&self, columns: &[String], values: &[Vec<String>], schema: &Schema) -> Result<Vec<datafusion::arrow::array::ArrayRef>> {
+        let mut arrays = Vec::new();
+        
+        for (col_idx, field) in schema.fields().iter().enumerate() {
+            let data_type = field.data_type();
+            
+            match data_type {
+                DataType::Int64 => {
+                    // Create Int64 array
+                    let mut int_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                int_values.push(None);
+                            } else {
+                                match value.parse::<i64>() {
+                                    Ok(int_val) => int_values.push(Some(int_val)),
+                                    Err(_) => int_values.push(None),
+                                }
+                            }
+                        } else {
+                            int_values.push(None);
+                        }
+                    }
+                    let array = Int64Array::from(int_values);
+                    arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+                },
+                DataType::Float64 => {
+                    // Create Float64 array
+                    let mut float_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                float_values.push(None);
+                            } else {
+                                match value.parse::<f64>() {
+                                    Ok(float_val) => float_values.push(Some(float_val)),
+                                    Err(_) => float_values.push(None),
+                                }
+                            }
+                        } else {
+                            float_values.push(None);
+                        }
+                    }
+                    let array = Float64Array::from(float_values);
+                    arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+                },
+                DataType::Boolean => {
+                    // Create Boolean array
+                    let mut bool_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                bool_values.push(None);
+                            } else {
+                                let lower = value.to_lowercase();
+                                match lower.as_str() {
+                                    "true" | "1" | "yes" | "y" => bool_values.push(Some(true)),
+                                    "false" | "0" | "no" | "n" => bool_values.push(Some(false)),
+                                    _ => bool_values.push(None),
+                                }
+                            }
+                        } else {
+                            bool_values.push(None);
+                        }
+                    }
+                    let array = BooleanArray::from(bool_values);
+                    arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+                },
+                DataType::Timestamp(unit, tz) => {
+                    // Create Timestamp array with the correct precision
+                    let mut timestamp_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                timestamp_values.push(None);
+                            } else {
+                                // Try to parse as timestamp
+                                match value.parse::<i64>() {
+                                    Ok(ts) => {
+                                        // Convert to the correct unit
+                                        let converted_ts = match unit {
+                                            TimeUnit::Second => ts,
+                                            TimeUnit::Millisecond => ts * 1_000,
+                                            TimeUnit::Microsecond => ts * 1_000_000,
+                                            TimeUnit::Nanosecond => ts * 1_000_000_000,
+                                        };
+                                        timestamp_values.push(Some(converted_ts));
+                                    }
+                                    Err(_) => {
+                                        // If not a number, try to parse as date string
+                                        // For now, just store as null if we can't parse
+                                        timestamp_values.push(None);
+                                    }
+                                }
+                            }
+                        } else {
+                            timestamp_values.push(None);
+                        }
+                    }
+                    
+                    // Create the appropriate timestamp array based on the unit
+                    let array: datafusion::arrow::array::ArrayRef = match unit {
+                        TimeUnit::Second => {
+                            let array = TimestampSecondArray::from(timestamp_values);
+                            Arc::new(array)
+                        },
+                        TimeUnit::Millisecond => {
+                            let array = TimestampMillisecondArray::from(timestamp_values);
+                            Arc::new(array)
+                        },
+                        TimeUnit::Microsecond => {
+                            let array = TimestampMicrosecondArray::from(timestamp_values);
+                            Arc::new(array)
+                        },
+                        TimeUnit::Nanosecond => {
+                            let array = TimestampNanosecondArray::from(timestamp_values);
+                            Arc::new(array)
+                        },
+                    };
+                    arrays.push(array);
+                },
+                DataType::Date32 => {
+                    // Create Date32 array
+                    let mut date_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                date_values.push(None);
+                            } else {
+                                // Try to parse as date string (YYYY-MM-DD format)
+                                match Self::parse_date_string(value) {
+                                    Some(days) => date_values.push(Some(days)),
+                                    None => date_values.push(None),
+                                }
+                            }
+                        } else {
+                            date_values.push(None);
+                        }
+                    }
+                    let array = Date32Array::from(date_values);
+                    arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+                },
+                _ => {
+                    // Default to String array for all other types
+                    let mut string_values = Vec::new();
+                    for row in values {
+                        if col_idx < row.len() {
+                            let value = &row[col_idx];
+                            // Treat null values as empty strings for display
+                            if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
+                                string_values.push(String::new());
+                            } else {
+                                string_values.push(value.clone());
+                            }
+                        } else {
+                            string_values.push(String::new());
+                        }
+                    }
+                    let array = StringArray::from(string_values);
+                    arrays.push(Arc::new(array) as datafusion::arrow::array::ArrayRef);
+                }
             }
         }
         
@@ -557,7 +882,7 @@ impl Database {
                     // Check first 10 rows to infer type
                     for row in rows.iter().take(10) {
                         if col_idx < row.len() {
-                            let value = &row[col_idx];
+                            let value: &str = &row[col_idx];
                             if !value.is_empty() {
                                 // Check if it's numeric
                                 if !value.chars().all(|c| c.is_numeric() || c == '.' || c == '-') {
@@ -593,6 +918,143 @@ impl Database {
         
         // Convert rows to Arrow arrays
         let arrays = self.string_rows_to_arrow_arrays(&headers, &rows)?;
+        
+        let batch = RecordBatch::try_new(Arc::new(schema), arrays)
+            .map_err(|e| FreshError::Custom(format!("Failed to create record batch: {}", e)))?;
+        
+        // Register the table with proper schema, handling replacement if it already exists
+        self.register_or_replace_table(table_name, batch.clone())?;
+        
+        // Store in our cache
+        self.registered_tables.insert(table_name.to_string(), Arc::new(batch));
+        
+        Ok(())
+    }
+
+    /// Enhanced CSV import that can skip lines and select a specific row as header
+    pub fn stream_insert_csv_with_header_row(&mut self, table_name: &str, csv_path: &Path, delimiter: char, header_row: usize) -> Result<()> {
+        use std::io::{BufRead, BufReader};
+        use std::fs::File;
+        
+        let file = File::open(csv_path)
+            .map_err(|e| FreshError::Custom(format!("Failed to open CSV file: {}", e)))?;
+        
+        let reader = BufReader::new(file);
+        let lines: Vec<String> = reader.lines()
+            .map(|line| line.unwrap_or_default())
+            .collect();
+        
+        // Validate header row (using original lines to match UI)
+        if header_row >= lines.len() {
+            return Err(FreshError::Custom("Header row exceeds file length".to_string()));
+        }
+        
+        // Start reading from the header row (using original lines to match UI)
+        let data_lines = lines.into_iter().skip(header_row).collect::<Vec<String>>();
+        
+        if data_lines.is_empty() {
+            return Err(FreshError::Custom("No data lines found after header row".to_string()));
+        }
+        
+        // Extract headers from the first row (which is now the header)
+        let headers: Vec<String> = if !data_lines.is_empty() {
+            let header_line = &data_lines[0];
+            Self::parse_csv_line(header_line, delimiter)
+        } else {
+            return Err(FreshError::Custom("No header row found".to_string()));
+        };
+        
+        // Parse data rows (skip the header row) and filter garbage
+        let mut rows = Vec::new();
+        for line in data_lines.iter().skip(1) {
+            // Skip comment lines (lines starting with #)
+            if line.trim().starts_with('#') {
+                continue;
+            }
+            
+            let row = Self::parse_csv_line(line, delimiter);
+            
+            // Skip empty rows and obvious garbage rows
+            let is_garbage = row.iter().all(|cell| cell.is_empty()) ||
+                           row.iter().any(|cell| {
+                               let cell_lower = cell.to_lowercase();
+                               cell_lower.contains("fake line") ||
+                               cell_lower.contains("ignore this") ||
+                               cell_lower.contains("data starts here") ||
+                               cell_lower.contains("realistic patterns")
+                           });
+            
+            if !is_garbage {
+                rows.push(row);
+            }
+        }
+        
+        // If no headers were found, create default column names
+        let mut final_headers = if headers.is_empty() {
+            (0..rows.first().map(|r| r.len()).unwrap_or(0))
+                .map(|i| format!("col_{}", i))
+                .collect()
+        } else {
+            headers
+        };
+        
+        // Deduplicate column names to avoid DataFusion errors
+        let mut seen_names = std::collections::HashSet::new();
+        let mut deduplicated_headers = Vec::new();
+        
+        for (i, header) in final_headers.iter().enumerate() {
+            let mut unique_name = header.clone();
+            let mut counter = 1;
+            
+            while seen_names.contains(&unique_name) {
+                unique_name = format!("{}_{}", header, counter);
+                counter += 1;
+            }
+            
+            seen_names.insert(unique_name.clone());
+            deduplicated_headers.push(unique_name);
+        }
+        
+        final_headers = deduplicated_headers;
+        
+        // If the table already exists with a schema, we need to ensure the data matches
+        if let Some(existing_batch) = self.registered_tables.get(table_name) {
+            let existing_schema = existing_batch.schema();
+            let expected_columns = existing_schema.fields().len();
+            
+            // Ensure all rows have the expected number of columns
+            for (row_idx, row) in rows.iter().enumerate() {
+                if row.len() != expected_columns {
+                    return Err(FreshError::Custom(format!(
+                        "Row {} has {} columns, but table schema expects {} columns",
+                        row_idx + 1, row.len(), expected_columns
+                    )));
+                }
+            }
+        }
+        
+        // Use the same type inference system as the UI (with null awareness)
+        
+        // Convert rows to the format expected by TypeInferrer
+        let sample_data: Vec<Vec<String>> = rows.iter().take(20).cloned().collect();
+        
+        // Infer types using the null-aware system (same as UI)
+        // For now, use default null values since we don't have access to user config here
+        let default_null_values = vec!["null".to_string(), "NULL".to_string(), "N/A".to_string(), "".to_string()];
+        let inferred_types = TypeInferrer::infer_column_types_with_nulls(&final_headers, &sample_data, &default_null_values);
+        
+        // Convert to Arrow schema
+        let fields: Vec<Field> = inferred_types.iter()
+            .map(|(name, col_type)| {
+                let data_type = col_type.to_arrow_type();
+                Field::new(name, data_type, true)
+            })
+            .collect();
+        
+        let schema = Schema::new(fields);
+        
+        // Convert rows to Arrow arrays using the same type inference
+        let arrays = self.string_rows_to_arrow_arrays_with_schema(&final_headers, &rows, &schema)?;
         
         let batch = RecordBatch::try_new(Arc::new(schema), arrays)
             .map_err(|e| FreshError::Custom(format!("Failed to create record batch: {}", e)))?;

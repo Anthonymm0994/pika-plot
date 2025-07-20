@@ -26,6 +26,7 @@ pub struct ColumnConfig {
 #[derive(Clone)]
 pub struct PreviewData {
     pub rows: Vec<Vec<String>>,
+    pub original_row_numbers: Vec<usize>,
 }
 
 impl FileConfig {
@@ -42,7 +43,7 @@ impl FileConfig {
             delimiter: ',',
             sample_size: 1000,
             columns: Vec::new(),
-            null_values: vec!["", "NULL", "null", "N/A"].into_iter().map(String::from).collect(),
+            null_values: vec!["", "NULL", "null", "N/A", "-"].into_iter().map(String::from).collect(),
             preview_data: None,
         }
     }
@@ -64,7 +65,7 @@ pub struct FileConfigDialog {
     
     // UI state
     null_value_input: String,
-    error: Option<String>,
+    pub error: Option<String>,
     processing_state: Arc<Mutex<ProcessingState>>,
     needs_resampling: bool,
 }
@@ -79,6 +80,40 @@ pub enum ProcessingState {
 }
 
 impl FileConfigDialog {
+    // Helper function to parse CSV line properly, handling quoted strings
+    fn parse_csv_line(line: &str, delimiter: char) -> Vec<String> {
+        let mut row = Vec::new();
+        let mut current_field = String::new();
+        let mut in_quotes = false;
+        let mut chars = line.chars().peekable();
+        
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' => {
+                    if in_quotes {
+                        // End of quoted field
+                        in_quotes = false;
+                    } else {
+                        // Start of quoted field
+                        in_quotes = true;
+                    }
+                },
+                c if c == delimiter && !in_quotes => {
+                    // End of field
+                    row.push(current_field.trim().to_string());
+                    current_field.clear();
+                },
+                _ => {
+                    current_field.push(ch);
+                }
+            }
+        }
+        
+        // Add the last field
+        row.push(current_field.trim().to_string());
+        row
+    }
+    
     pub fn new() -> Self {
         Self {
             show: false,
@@ -418,9 +453,9 @@ impl FileConfigDialog {
                                     
                                     // Convert to 1-indexed for display
                                     let mut header_row_display = config.header_row; // 1-indexed for display
-                                    let max_rows = config.preview_data.as_ref()
-                                        .map(|p| p.rows.len())
-                                        .unwrap_or(10) as i32;
+                                    
+                                    // Always show 1-50 range for header row selection
+                                    let max_rows = 50;
                                     
                                     let response = ui.add(
                                         egui::DragValue::new(&mut header_row_display)
@@ -434,7 +469,7 @@ impl FileConfigDialog {
                                         self.needs_resampling = true;
                                     }
                                     
-                                    ui.label(format!("(1-{})", max_rows));
+                                    ui.label("(1-50)");
                                 });
                                 
                                 ui.add_space(5.0);
@@ -648,11 +683,13 @@ impl FileConfigDialog {
                                         use egui_extras::{TableBuilder, Column};
                                         
                                         // Calculate number of columns (row number + data columns)
-                                        let num_columns = if let Some(first_row) = preview.rows.first() {
-                                            first_row.len() + 1 // +1 for row number column
-                                        } else {
-                                            1
-                                        };
+                                        let max_columns = preview.rows.iter()
+                                            .map(|row| row.len())
+                                            .max()
+                                            .unwrap_or(0);
+                                        let num_columns = max_columns + 1; // +1 for row number column
+                                        
+
                                         
                                         TableBuilder::new(ui)
                                             .striped(true)
@@ -663,27 +700,37 @@ impl FileConfigDialog {
                                             .vscroll(false) // We're already in a scroll area
                                             .body(|mut body| {
                                                 for (row_idx, row) in preview.rows.iter().enumerate() {
-                                                    let is_header = row_idx == config.header_row - 1; // 1-indexed for preview
+                                                    let is_header = row_idx == config.header_row.saturating_sub(1); // Convert 1-indexed to 0-indexed
                                                     let color = if is_header {
                                                         egui::Color32::from_rgb(100, 200, 100)
                                                     } else {
                                                         egui::Color32::from_gray(200)
                                                     };
                                                     
+                                                    // Show actual file row numbers (1-indexed)
+                                                    let file_row_number = row_idx + 1; // 1-indexed file row numbers
+                                                    
                                                     body.row(20.0, |mut table_row| {
                                                         // Row number
                                                         table_row.col(|ui| {
-                                                            let row_text = egui::RichText::new((row_idx + 1).to_string())
+                                                            let row_text = egui::RichText::new(file_row_number.to_string())
                                                                 .color(if is_header { color } else { egui::Color32::from_gray(150) });
                                                             ui.label(if is_header { row_text.strong() } else { row_text });
                                                         });
                                                         
                                                         // Row data
-                                                        for cell in row.iter() {
+                                                        for (col_idx, cell) in row.iter().enumerate() {
                                                             table_row.col(|ui| {
                                                                 let cell_text = egui::RichText::new(cell)
                                                                     .color(if is_header { color } else { egui::Color32::from_gray(200) });
                                                                 ui.label(if is_header { cell_text.strong() } else { cell_text });
+                                                            });
+                                                        }
+                                                        
+                                                        // Fill remaining columns with empty cells if this row has fewer columns
+                                                        for _ in row.len()..max_columns {
+                                                            table_row.col(|ui| {
+                                                                ui.label("");
                                                             });
                                                         }
                                                     });
@@ -709,42 +756,76 @@ impl FileConfigDialog {
         }
     }
     
-    fn load_preview_for_current_file(&mut self) {
+    pub fn load_preview_for_current_file(&mut self) {
         if let Some(config) = self.files.get_mut(self.current_file_index) {
             let path = config.path.clone();
             let delimiter = config.delimiter;
             let sample_size = config.sample_size;
-            
             let header_row = config.header_row;
             
-            // Load preview data
-            match CsvReader::from_path(&path) {
-                Ok(mut reader) => {
-                    reader.set_delimiter(delimiter);
+                                // Load preview data from the beginning of the file (first 50 rows)
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            let lines: Vec<&str> = content.lines().collect();
+                            
+                            // Take more lines to ensure we get 50 valid rows for preview
+                            let data_lines = lines.into_iter().take(200).collect::<Vec<&str>>();
                     
-                    // Read preview rows
-                    let mut preview_rows: Vec<Vec<String>> = Vec::new();
-                    if let Ok(records) = reader.sample_records(sample_size.min(50)) {
-                        for record in records {
-                            preview_rows.push(record.iter().map(|s| s.to_string()).collect());
-                        }
+                    if data_lines.is_empty() {
+                        self.error = Some("No data found in file".to_string());
+                        return;
                     }
                     
-                    // Get headers from the specified row (convert from 1-indexed to 0-indexed)
-                    let header_row_idx = header_row.saturating_sub(1);
-                    if let Some(header_row_data) = preview_rows.get(header_row_idx) {
-                        let headers = header_row_data.clone();
+                    // Show raw file content for preview (first 50 lines)
+                    let mut preview_rows: Vec<Vec<String>> = Vec::new();
+                    let mut valid_data_rows = Vec::new();
+                    
+                    // Collect raw lines for preview (up to 50 lines)
+                    for (line_idx, line) in data_lines.iter().enumerate() {
+                        // Parse the line to show as individual cells
+                        let row = Self::parse_csv_line(line, delimiter);
+                        preview_rows.push(row.clone());
                         
-                        // Sample data for type inference (skip header row)
-                        let mut sample_data = Vec::new();
-                        for (idx, row) in preview_rows.iter().enumerate() {
-                            if idx > header_row_idx && sample_data.len() < sample_size {
-                                sample_data.push(row.clone());
+                        // Also collect valid data rows for type inference (filtered)
+                        if !line.trim().starts_with('#') {
+                            let is_garbage = row.iter().all(|cell| cell.is_empty()) ||
+                                           row.iter().any(|cell| {
+                                               let cell_lower = cell.to_lowercase();
+                                               cell_lower.contains("fake line") ||
+                                               cell_lower.contains("ignore this") ||
+                                               cell_lower.contains("data starts here") ||
+                                               cell_lower.contains("realistic patterns")
+                                           });
+                            
+                            if !is_garbage && valid_data_rows.len() < sample_size {
+                                valid_data_rows.push(row);
                             }
                         }
                         
-                        // Infer types
-                        let inferred_types = TypeInferrer::infer_column_types(&headers, &sample_data);
+                        // Stop after 50 lines for preview
+                        if preview_rows.len() >= 50 {
+                            break;
+                        }
+                    }
+                    
+                    // Get the header row from the selected header row position (1-indexed to 0-indexed)
+                    let header_idx = header_row.saturating_sub(1);
+                    if header_idx < preview_rows.len() {
+                        let headers = preview_rows[header_idx].clone();
+                        
+                        // Use data rows after the header row for type inference (not filtered)
+                        let mut sample_data = Vec::new();
+                        for (idx, row) in preview_rows.iter().enumerate() {
+                            if idx > header_idx && sample_data.len() < sample_size {
+                                // Skip comment lines (lines starting with #)
+                                if !row.is_empty() && !row[0].starts_with('#') {
+                                    sample_data.push(row.clone());
+                                }
+                            }
+                        }
+                        
+                        // Infer types using the sample data with null value awareness
+                        let inferred_types = TypeInferrer::infer_column_types_with_nulls(&headers, &sample_data, &config.null_values);
                         
                         // Update columns
                         config.columns.clear();
@@ -757,7 +838,10 @@ impl FileConfigDialog {
                         }
                     }
                     
-                    config.preview_data = Some(PreviewData { rows: preview_rows });
+                    config.preview_data = Some(PreviewData { 
+                        rows: preview_rows,
+                        original_row_numbers: Vec::new(), // Not used anymore
+                    });
                 }
                 Err(e) => {
                     self.error = Some(format!("Failed to load preview: {}", e));
@@ -781,8 +865,8 @@ impl FileConfigDialog {
                 
                 // Import data for each file
                 for (file_idx, config) in files.iter().enumerate() {
-                    // Use streaming import for large files (header_row is 1-indexed, convert to has_header boolean)
-                    if let Err(e) = db.stream_insert_csv(&config.table_name, &config.path, config.delimiter, config.header_row > 0) {
+                    // Use enhanced streaming import with custom header row
+                    if let Err(e) = db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
                         self.error = Some(format!("Failed to import {}: {}", config.file_name(), e));
                         return None;
                     }
@@ -833,8 +917,8 @@ impl FileConfigDialog {
                         );
                     }
                     
-                    // Use streaming import for large files (header_row is 1-indexed, convert to has_header boolean)
-                    if let Err(e) = db.stream_insert_csv(&config.table_name, &config.path, config.delimiter, config.header_row > 0) {
+                    // Use enhanced streaming import with custom header row
+                    if let Err(e) = db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
                         if let Ok(mut state) = processing_state.lock() {
                             *state = ProcessingState::Error(format!("Failed to import {}: {}", config.file_name(), e));
                         }

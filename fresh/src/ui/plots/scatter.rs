@@ -468,8 +468,8 @@ impl PlotTrait for ScatterPlot {
                     let point_size = point.size.unwrap_or(config.marker_size);
                     let alpha = 1.0;
                     
-                    // Use original color for consistency with legend
-                    let point_color = series.color.linear_multiply(alpha);
+                    // Use point-specific color if available, otherwise fall back to series color
+                    let point_color = point.color.unwrap_or(series.color).linear_multiply(alpha);
                     
                     // Add highlighting effect without changing base color
                     if is_hovered {

@@ -106,6 +106,21 @@ impl TypeInferrer {
             })
             .collect()
     }
+
+    pub fn infer_column_types_with_nulls(
+        headers: &[String],
+        samples: &[Vec<String>],
+        null_values: &[String],
+    ) -> Vec<(String, ColumnType)> {
+        headers
+            .iter()
+            .enumerate()
+            .map(|(idx, header)| {
+                let column_type = Self::infer_column_type_with_nulls(header, samples, idx, null_values);
+                (header.clone(), column_type)
+            })
+            .collect()
+    }
     
     fn infer_column_type(header: &str, samples: &[Vec<String>], col_idx: usize) -> ColumnType {
         // First check header for time unit hints
@@ -118,6 +133,7 @@ impl TypeInferrer {
         let mut is_bool = true;
         let mut is_date = true;
         let mut is_datetime = true;
+        let mut is_time = true;
         let mut non_empty_count = 0;
         let mut has_decimal = false;
         
@@ -165,6 +181,11 @@ impl TypeInferrer {
                 if is_datetime && !Self::is_datetime(value) {
                     is_datetime = false;
                 }
+                
+                // Check time (HH:MM:SS format)
+                if is_time && !Self::is_time(value) {
+                    is_time = false;
+                }
             }
         }
         
@@ -186,6 +207,104 @@ impl TypeInferrer {
             ColumnType::DateTime
         } else if is_date {
             ColumnType::Date
+        } else if is_time {
+            ColumnType::TimeSeconds
+        } else {
+            ColumnType::Text
+        }
+    }
+
+    fn infer_column_type_with_nulls(header: &str, samples: &[Vec<String>], col_idx: usize, null_values: &[String]) -> ColumnType {
+        // First check header for time unit hints
+        if let Some(time_type) = Self::detect_time_unit_from_header(header) {
+            return time_type;
+        }
+
+        let mut is_int = true;
+        let mut is_float = true;
+        let mut is_bool = true;
+        let mut is_date = true;
+        let mut is_datetime = true;
+        let mut is_time = true;
+        let mut non_empty_count = 0;
+        let mut has_decimal = false;
+        
+        for row in samples {
+            if let Some(value) = row.get(col_idx) {
+                // Check if value is a null value (case-insensitive)
+                let is_null = value.is_empty() || 
+                    null_values.iter().any(|null_val| value.to_lowercase() == null_val.to_lowercase());
+                
+                if is_null {
+                    continue;
+                }
+                
+                non_empty_count += 1;
+                
+                // Check boolean
+                if is_bool {
+                    let lower = value.to_lowercase();
+                    if !matches!(lower.as_str(), "true" | "false" | "1" | "0" | "yes" | "no" | "y" | "n") {
+                        is_bool = false;
+                    }
+                }
+                
+                // Check integer
+                if is_int {
+                    if value.parse::<i64>().is_err() {
+                        is_int = false;
+                    }
+                }
+                
+                // Check float (but track if we see decimals)
+                if is_float {
+                    match value.parse::<f64>() {
+                        Ok(_) => {
+                            if value.contains('.') {
+                                has_decimal = true;
+                            }
+                        }
+                        Err(_) => is_float = false,
+                    }
+                }
+                
+                // Check date
+                if is_date && !Self::is_date(value) {
+                    is_date = false;
+                }
+                
+                // Check datetime
+                if is_datetime && !Self::is_datetime(value) {
+                    is_datetime = false;
+                }
+                
+                // Check time (HH:MM:SS format)
+                if is_time && !Self::is_time(value) {
+                    is_time = false;
+                }
+            }
+        }
+        
+        // Return the most specific type that matches
+        if non_empty_count == 0 {
+            ColumnType::Text
+        } else if is_bool {
+            ColumnType::Boolean
+        } else if is_int {
+            ColumnType::Integer
+        } else if is_float {
+            // Only use Real if we actually saw decimal values
+            if has_decimal {
+                ColumnType::Real
+            } else {
+                ColumnType::Integer
+            }
+        } else if is_datetime {
+            ColumnType::DateTime
+        } else if is_date {
+            ColumnType::Date
+        } else if is_time {
+            ColumnType::TimeSeconds
         } else {
             ColumnType::Text
         }
@@ -265,6 +384,30 @@ impl TypeInferrer {
             if ts > 946684800000 && ts < 4102444800000 {
                 // Between 2000 and 2100 in milliseconds
                 return true;
+            }
+        }
+        false
+    }
+
+    fn is_time(value: &str) -> bool {
+        // Check for HH:MM:SS format
+        let parts: Vec<&str> = value.split(':').collect();
+        if parts.len() == 3 {
+            // Should be HH:MM:SS
+            if let (Ok(hour), Ok(minute), Ok(second)) = (
+                parts[0].parse::<u8>(),
+                parts[1].parse::<u8>(),
+                parts[2].parse::<u8>()
+            ) {
+                return hour < 24 && minute < 60 && second < 60;
+            }
+        } else if parts.len() == 2 {
+            // Should be HH:MM
+            if let (Ok(hour), Ok(minute)) = (
+                parts[0].parse::<u8>(),
+                parts[1].parse::<u8>()
+            ) {
+                return hour < 24 && minute < 60;
             }
         }
         false

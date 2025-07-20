@@ -428,20 +428,8 @@ impl PlotTrait for HistogramPlot {
     }
 
     fn required_y_types(&self) -> Vec<DataType> {
-        // Y axis must be numeric for histogram calculation
-        vec![
-            DataType::Int8,
-            DataType::Int16,
-            DataType::Int32,
-            DataType::Int64,
-            DataType::UInt8,
-            DataType::UInt16,
-            DataType::UInt32,
-            DataType::UInt64,
-            DataType::Float16,
-            DataType::Float32,
-            DataType::Float64,
-        ]
+        // Histogram only needs a single value column (no Y axis)
+        vec![]
     }
 
     fn supports_multiple_series(&self) -> bool {
@@ -467,17 +455,17 @@ impl PlotTrait for HistogramPlot {
         // Process data synchronously
         let (series, _bin_edges) = self.process_data_sync(query_result, config)?;
 
-        // Calculate statistics
-        let y_idx = query_result
+        // Calculate statistics - use the value column (which is stored in y_column for histograms)
+        let value_idx = query_result
             .columns
             .iter()
             .position(|c| c == &config.y_column)
-            .ok_or_else(|| format!("Y column '{}' not found", config.y_column))?;
+            .ok_or_else(|| format!("Value column '{}' not found", config.y_column))?;
 
         let mut values = Vec::new();
         for row in &query_result.rows {
-            if row.len() > y_idx {
-                if let Ok(val) = row[y_idx].parse::<f64>() {
+            if row.len() > value_idx {
+                if let Ok(val) = row[value_idx].parse::<f64>() {
                     values.push(val);
                 }
             }

@@ -546,10 +546,16 @@ impl BarChartPlot {
             });
         }
         
-        // Create series
+        // Create series with meaningful name based on the data
+        let series_name = if config.group_column.is_some() && !config.group_column.as_ref().unwrap().is_empty() {
+            format!("{} by {}", config.y_column, config.group_column.as_ref().unwrap())
+        } else {
+            format!("{} by {}", config.y_column, config.x_column)
+        };
+        
         let series = DataSeries {
             id: "main".to_string(),
-            name: "Bars".to_string(),
+            name: series_name,
             points,
             color: series_color, // Set series color
             visible: true,
@@ -704,11 +710,15 @@ impl PlotTrait for BarChartPlot {
         let mut plot = Plot::new("bar_chart")
             .allow_zoom(config.allow_zoom)
             .allow_drag(config.allow_pan)
-            .show_grid(config.show_grid)
-            .legend(Legend::default()
+            .show_grid(config.show_grid);
+        
+        // Only show built-in legend if we're not using custom legend
+        if !config.show_legend {
+            plot = plot.legend(Legend::default()
                 .position(egui_plot::Corner::RightBottom)
                 .background_alpha(0.8)
                 .text_style(egui::TextStyle::Small));
+        }
 
         // Add axis labels if enabled
         if config.show_axes_labels {
@@ -716,6 +726,9 @@ impl PlotTrait for BarChartPlot {
                 .x_axis_label(config.x_column.clone())
                 .y_axis_label(config.y_column.clone());
         }
+        
+        // Note: Custom X-axis labels for categories would require more complex handling
+        // For now, we'll use the default numeric labels
 
         // Track hover state for highlighting
         let mut hovered_bar: Option<(usize, usize)> = None; // (series_idx, point_idx)
@@ -901,7 +914,7 @@ impl PlotTrait for BarChartPlot {
                         }
                     }
                 } else {
-                    // For simple bars, show categories
+                    // For simple bars, show categories or groups
                     ui.label(RichText::new("Categories:").strong());
                     ui.separator();
                     
@@ -910,9 +923,10 @@ impl PlotTrait for BarChartPlot {
                     for series in &data.series {
                         if series.visible {
                             for point in &series.points {
-                                if let (Some(label), Some(color)) = (&point.label, point.color) {
-                                    category_colors.insert(label.clone(), color);
-                                }
+                                // Use point label if available, otherwise use series name
+                                let label = point.label.as_ref().unwrap_or(&series.name);
+                                let color = point.color.unwrap_or(series.color);
+                                category_colors.insert(label.clone(), color);
                             }
                         }
                     }

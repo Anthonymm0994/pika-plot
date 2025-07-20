@@ -534,7 +534,8 @@ impl PlotTrait for BoxPlotImpl {
         
         // Store stats_map in a special field for tooltips
         if let Some(first_point) = plot_data.points.first_mut() {
-            first_point.tooltip_data.insert("__stats_map__".to_string(), format!("{:?}", stats_map));
+            // Store the number of groups for later reconstruction
+            first_point.tooltip_data.insert("__stats_count__".to_string(), stats_map.len().to_string());
         }
         
         Ok(plot_data)

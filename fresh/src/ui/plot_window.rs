@@ -433,10 +433,15 @@ impl<'a> PlotWindow<'a> {
         if let Some(data) = &self.data {
             if let Some(plot_type) = &self.config.plot_type {
                 let plot_type_clone = plot_type.clone();
-                if let Ok(plot_data) = self.prepare_plot_data(data, &plot_type_clone) {
-                    self.render_plot(ui, &plot_type_clone, plot_data);
-                } else {
-                    ui.label("Failed to prepare plot data");
+                match self.prepare_plot_data(data, &plot_type_clone) {
+                    Ok(plot_data) => {
+                        self.render_plot(ui, &plot_type_clone, plot_data);
+                    },
+                    Err(error) => {
+                        ui.colored_label(egui::Color32::RED, "Failed to prepare plot data");
+                        ui.label(RichText::new(format!("Error: {}", error)).weak());
+                        ui.label("Please check your column selections and data types.");
+                    }
                 }
             } else {
                 ui.label("Please select a plot type");
@@ -893,8 +898,35 @@ impl<'a> PlotWindow<'a> {
                                 "compatible"
                             };
                             
-                            return Err(format!("Column '{}' has type {:?} which is not valid for {} plot (expected {} for position {})", 
-                                self.config.primary_columns[i], column_type, plot_type.name(), expected_type, i + 1));
+                            let error_msg = if let PlotType::BoxPlot = plot_type {
+                                if i == 0 {
+                                    format!("Column '{}' has type {:?}. Box plots expect categorical data (strings) for grouping on the X-axis.", 
+                                        self.config.primary_columns[i], column_type)
+                                } else {
+                                    format!("Column '{}' has type {:?}. Box plots expect numeric data for the Y-axis.", 
+                                        self.config.primary_columns[i], column_type)
+                                }
+                            } else if let PlotType::ViolinPlot = plot_type {
+                                if i == 0 {
+                                    format!("Column '{}' has type {:?}. Violin plots expect categorical data (strings) for grouping on the X-axis.", 
+                                        self.config.primary_columns[i], column_type)
+                                } else {
+                                    format!("Column '{}' has type {:?}. Violin plots expect numeric data for the Y-axis.", 
+                                        self.config.primary_columns[i], column_type)
+                                }
+                            } else if let PlotType::PolarPlot = plot_type {
+                                if i == 0 {
+                                    format!("Column '{}' has type {:?}. Polar plots expect numeric data for the angle (X-axis).", 
+                                        self.config.primary_columns[i], column_type)
+                                } else {
+                                    format!("Column '{}' has type {:?}. Polar plots expect numeric data for the radius (Y-axis).", 
+                                        self.config.primary_columns[i], column_type)
+                                }
+                            } else {
+                                format!("Column '{}' has type {:?} which is not valid for {} plot (expected {} for position {})", 
+                                    self.config.primary_columns[i], column_type, plot_type.name(), expected_type, i + 1)
+                            };
+                            return Err(error_msg);
                         }
                     }
                 }
@@ -1174,32 +1206,147 @@ impl<'a> PlotWindow<'a> {
             use PlotType::*;
             
             match plot_type {
-                BarChart => plots::bar::BarChartPlot.render(ui, &plot_data, &plot_config),
-                LineChart => plots::line::LineChartPlot.render(ui, &plot_data, &plot_config),
-                ScatterPlot => plots::scatter::ScatterPlot.render(ui, &plot_data, &plot_config),
-                Histogram => plots::histogram::HistogramPlot.render(ui, &plot_data, &plot_config),
-                BoxPlot => plots::box_plot::BoxPlotImpl.render(ui, &plot_data, &plot_config),
+                BarChart => {
+                    plots::bar::BarChartPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::bar::BarChartPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                LineChart => {
+                    plots::line::LineChartPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::line::LineChartPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                ScatterPlot => {
+                    plots::scatter::ScatterPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::scatter::ScatterPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                Histogram => {
+                    plots::histogram::HistogramPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::histogram::HistogramPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                BoxPlot => {
+                    plots::box_plot::BoxPlotImpl.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::box_plot::BoxPlotImpl.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
                 
                 // These will show "coming soon" messages for now
-                HeatMap => plots::heatmap::HeatmapPlot.render(ui, &plot_data, &plot_config),
-                ViolinPlot => plots::violin::ViolinPlot::new().render(ui, &plot_data, &plot_config),
-                AnomalyDetection => plots::anomaly::AnomalyPlot.render(ui, &plot_data, &plot_config),
-                CorrelationMatrix => plots::correlation::CorrelationPlot.render(ui, &plot_data, &plot_config),
+                HeatMap => {
+                    plots::heatmap::HeatmapPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::heatmap::HeatmapPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                ViolinPlot => {
+                    plots::violin::ViolinPlot::new().render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::violin::ViolinPlot::new().render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                AnomalyDetection => {
+                    plots::anomaly::AnomalyPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::anomaly::AnomalyPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                CorrelationMatrix => {
+                    plots::correlation::CorrelationPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::correlation::CorrelationPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
     
-                Scatter3D => plots::scatter3d::Scatter3DPlot.render(ui, &plot_data, &plot_config),
-                Surface3D => plots::surface3d::Surface3dPlot.render(ui, &plot_data, &plot_config),
-                ContourPlot => plots::contour::ContourPlot.render(ui, &plot_data, &plot_config),
-                ParallelCoordinates => plots::parallel_coordinates::ParallelCoordinatesPlot.render(ui, &plot_data, &plot_config),
-                RadarChart => plots::radar::RadarPlot.render(ui, &plot_data, &plot_config),
-                SankeyDiagram => plots::sankey::SankeyPlot.render(ui, &plot_data, &plot_config),
-                Treemap => plots::treemap::TreemapPlot.render(ui, &plot_data, &plot_config),
-                SunburstChart => plots::sunburst::SunburstPlot.render(ui, &plot_data, &plot_config),
-                NetworkGraph => plots::network::NetworkPlot.render(ui, &plot_data, &plot_config),
-                GeoPlot => plots::geo::GeoPlot.render(ui, &plot_data, &plot_config),
-                TimeAnalysis => plots::time_analysis::TimeAnalysisPlot.render(ui, &plot_data, &plot_config),
-                CandlestickChart => plots::candlestick::CandlestickPlot.render(ui, &plot_data, &plot_config),
-                StreamGraph => plots::stream::StreamPlot.render(ui, &plot_data, &plot_config),
-                PolarPlot => plots::polar::PolarPlot.render(ui, &plot_data, &plot_config),
+                Scatter3D => {
+                    plots::scatter3d::Scatter3DPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::scatter3d::Scatter3DPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                Surface3D => {
+                    plots::surface3d::Surface3dPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::surface3d::Surface3dPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                ContourPlot => {
+                    plots::contour::ContourPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::contour::ContourPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                ParallelCoordinates => {
+                    plots::parallel_coordinates::ParallelCoordinatesPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::parallel_coordinates::ParallelCoordinatesPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                RadarChart => {
+                    plots::radar::RadarPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::radar::RadarPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                SankeyDiagram => {
+                    plots::sankey::SankeyPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::sankey::SankeyPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                Treemap => {
+                    plots::treemap::TreemapPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::treemap::TreemapPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                SunburstChart => {
+                    plots::sunburst::SunburstPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::sunburst::SunburstPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                NetworkGraph => {
+                    plots::network::NetworkPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::network::NetworkPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                GeoPlot => {
+                    plots::geo::GeoPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::geo::GeoPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                TimeAnalysis => {
+                    plots::time_analysis::TimeAnalysisPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::time_analysis::TimeAnalysisPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                CandlestickChart => {
+                    plots::candlestick::CandlestickPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::candlestick::CandlestickPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                StreamGraph => {
+                    plots::stream::StreamPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::stream::StreamPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
+                PolarPlot => {
+                    plots::polar::PolarPlot.render(ui, &plot_data, &plot_config);
+                    if plot_config.show_legend {
+                        plots::polar::PolarPlot.render_legend(ui, &plot_data, &plot_config);
+                    }
+                },
             }
         });
     }
