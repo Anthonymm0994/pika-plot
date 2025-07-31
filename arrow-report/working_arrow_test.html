@@ -25,6 +25,7 @@
     <div class="container">
         <h1>🚀 Working Arrow File Test</h1>
         <p>This page actually loads and parses Arrow files, then creates plots.</p>
+        <p><strong>Use these files:</strong> simple_test.arrow or simple_timeseries.arrow</p>
         
         <div class="test-section">
             <h2>Step 1: Load Arrow File</h2>
@@ -102,12 +103,17 @@
                     
                     log('Arrow library loaded successfully');
                     log(`Arrow object: ${typeof Arrow}`);
+                    log(`Available methods: ${Object.keys(Arrow).join(', ')}`);
                     
-                    // Try to parse the Arrow file
+                    // Use the correct API: tableFromIPC
                     let table;
                     let method = '';
                     
-                    if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
+                    if (typeof Arrow.tableFromIPC === 'function') {
+                        table = Arrow.tableFromIPC(uint8Array);
+                        method = 'Arrow.tableFromIPC';
+                        log('Parsed with Arrow.tableFromIPC');
+                    } else if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
                         table = Arrow.Table.from(uint8Array);
                         method = 'Arrow.Table.from';
                         log('Parsed with Arrow.Table.from');
@@ -120,7 +126,7 @@
                         method = 'Arrow.read';
                         log('Parsed with Arrow.read');
                     } else {
-                        throw new Error('No compatible Arrow parsing method found');
+                        throw new Error('No compatible Arrow parsing method found. Available: ' + Object.keys(Arrow).join(', '));
                     }
                     
                     // Convert to JavaScript objects for plotting
