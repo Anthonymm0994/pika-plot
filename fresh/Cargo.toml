@@ -58,6 +58,10 @@ name = "test_height_fixes"
 path = "test_data/test_height_fixes.rs"
 
 [[bin]]
+name = "test_time_display"
+path = "test_data/test_time_display.rs"
+
+[[bin]]
 name = "debug_time_import"
 path = "test_data/debug_time_import.rs"
 

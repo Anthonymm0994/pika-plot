@@ -538,7 +538,7 @@ impl Database {
                 Ok(bool_array.value(index).to_string())
             }
             DataType::Timestamp(unit, _) => {
-                // Handle timestamp arrays
+                // Handle timestamp arrays - convert back to time-only format
                 match unit {
                     TimeUnit::Second => {
                         let timestamp_array = array.as_any().downcast_ref::<TimestampSecondArray>().unwrap();
@@ -546,11 +546,11 @@ impl Database {
                             Ok("".to_string())
                         } else {
                             let timestamp = timestamp_array.value(index);
-                            // Convert seconds since epoch to readable format
-                            match chrono::DateTime::from_timestamp(timestamp, 0) {
-                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                                None => Ok("Invalid timestamp".to_string())
-                            }
+                            // Convert seconds since midnight back to HH:MM:SS format
+                            let hours = (timestamp / 3600) % 24;
+                            let minutes = (timestamp / 60) % 60;
+                            let seconds = timestamp % 60;
+                            Ok(format!("{:02}:{:02}:{:02}", hours, minutes, seconds))
                         }
                     }
                     TimeUnit::Millisecond => {
@@ -559,12 +559,13 @@ impl Database {
                             Ok("".to_string())
                         } else {
                             let timestamp = timestamp_array.value(index);
-                            // Convert milliseconds to seconds for chrono
-                            let seconds = timestamp / 1_000;
-                            match chrono::DateTime::from_timestamp(seconds, 0) {
-                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                                None => Ok("Invalid timestamp".to_string())
-                            }
+                            // Convert milliseconds since midnight back to HH:MM:SS.mmm format
+                            let total_seconds = timestamp / 1_000;
+                            let milliseconds = timestamp % 1_000;
+                            let hours = (total_seconds / 3600) % 24;
+                            let minutes = (total_seconds / 60) % 60;
+                            let seconds = total_seconds % 60;
+                            Ok(format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, seconds, milliseconds))
                         }
                     }
                     TimeUnit::Microsecond => {
@@ -573,12 +574,13 @@ impl Database {
                             Ok("".to_string())
                         } else {
                             let timestamp = timestamp_array.value(index);
-                            // Convert microseconds to seconds for chrono
-                            let seconds = timestamp / 1_000_000;
-                            match chrono::DateTime::from_timestamp(seconds, 0) {
-                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                                None => Ok("Invalid timestamp".to_string())
-                            }
+                            // Convert microseconds since midnight back to HH:MM:SS.mmmmmm format
+                            let total_seconds = timestamp / 1_000_000;
+                            let microseconds = timestamp % 1_000_000;
+                            let hours = (total_seconds / 3600) % 24;
+                            let minutes = (total_seconds / 60) % 60;
+                            let seconds = total_seconds % 60;
+                            Ok(format!("{:02}:{:02}:{:02}.{:06}", hours, minutes, seconds, microseconds))
                         }
                     }
                     TimeUnit::Nanosecond => {
@@ -587,12 +589,13 @@ impl Database {
                             Ok("".to_string())
                         } else {
                             let timestamp = timestamp_array.value(index);
-                            // Convert nanoseconds to seconds for chrono
-                            let seconds = timestamp / 1_000_000_000;
-                            match chrono::DateTime::from_timestamp(seconds, 0) {
-                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                                None => Ok("Invalid timestamp".to_string())
-                            }
+                            // Convert nanoseconds since midnight back to HH:MM:SS.nnnnnnnnn format
+                            let total_seconds = timestamp / 1_000_000_000;
+                            let nanoseconds = timestamp % 1_000_000_000;
+                            let hours = (total_seconds / 3600) % 24;
+                            let minutes = (total_seconds / 60) % 60;
+                            let seconds = total_seconds % 60;
+                            Ok(format!("{:02}:{:02}:{:02}.{:09}", hours, minutes, seconds, nanoseconds))
                         }
                     }
                 }
