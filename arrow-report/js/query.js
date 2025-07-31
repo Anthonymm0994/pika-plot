@@ -52,7 +52,9 @@ class ArrowQuery {
 
         // Apply each filter
         for (const [fieldName, values] of this.filters) {
-            filtered = filtered.filter(d => values.includes(d[fieldName]));
+            if (filtered && typeof filtered.filter === 'function') {
+                filtered = filtered.filter(d => values.includes(d[fieldName]));
+            }
         }
 
         // Apply derived fields
@@ -106,16 +108,30 @@ class ArrowQuery {
     // Add row difference field
     addDifferenceField(data, fieldName, sourceField) {
         try {
-            return data.derive({
-                [fieldName]: d => {
-                    const values = data.get(sourceField).values();
-                    const index = data.get(sourceField).indices().indexOf(d[sourceField]);
-                    if (index > 0) {
-                        return d[sourceField] - values[index - 1];
+            // Check if it's an Arquero table
+            if (data && typeof data.derive === 'function') {
+                return data.derive({
+                    [fieldName]: d => {
+                        const values = data.get(sourceField).values();
+                        const index = data.get(sourceField).indices().indexOf(d[sourceField]);
+                        if (index > 0) {
+                            return d[sourceField] - values[index - 1];
+                        }
+                        return null;
                     }
-                    return null;
-                }
-            });
+                });
+            } else {
+                // Handle regular JavaScript array
+                return data.map((row, index) => {
+                    const newRow = { ...row };
+                    if (index > 0) {
+                        newRow[fieldName] = row[sourceField] - data[index - 1][sourceField];
+                    } else {
+                        newRow[fieldName] = null;
+                    }
+                    return newRow;
+                });
+            }
         } catch (error) {
             console.error('Error adding difference field:', error);
             return data;
@@ -125,18 +141,38 @@ class ArrowQuery {
     // Add binned field
     addBinnedField(data, fieldName, sourceField, bins) {
         try {
-            const values = data.get(sourceField).values().filter(v => v != null);
-            const min = Math.min(...values);
-            const max = Math.max(...values);
-            const binSize = (max - min) / bins;
+            // Check if it's an Arquero table
+            if (data && typeof data.derive === 'function') {
+                const values = data.get(sourceField).values().filter(v => v != null);
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const binSize = (max - min) / bins;
 
-            return data.derive({
-                [fieldName]: d => {
-                    if (d[sourceField] == null) return null;
-                    const binIndex = Math.floor((d[sourceField] - min) / binSize);
-                    return Math.min(binIndex, bins - 1);
-                }
-            });
+                return data.derive({
+                    [fieldName]: d => {
+                        if (d[sourceField] == null) return null;
+                        const binIndex = Math.floor((d[sourceField] - min) / binSize);
+                        return Math.min(binIndex, bins - 1);
+                    }
+                });
+            } else {
+                // Handle regular JavaScript array
+                const values = data.map(row => row[sourceField]).filter(v => v != null);
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const binSize = (max - min) / bins;
+
+                return data.map(row => {
+                    const newRow = { ...row };
+                    if (row[sourceField] != null) {
+                        const binIndex = Math.floor((row[sourceField] - min) / binSize);
+                        newRow[fieldName] = Math.min(binIndex, bins - 1);
+                    } else {
+                        newRow[fieldName] = null;
+                    }
+                    return newRow;
+                });
+            }
         } catch (error) {
             console.error('Error adding binned field:', error);
             return data;
@@ -146,18 +182,30 @@ class ArrowQuery {
     // Add rolling mean field
     addRollingMeanField(data, fieldName, sourceField, window) {
         try {
-            const values = data.get(sourceField).values();
-            
-            return data.derive({
-                [fieldName]: d => {
-                    const index = data.get(sourceField).indices().indexOf(d[sourceField]);
+            // Check if it's an Arquero table
+            if (data && typeof data.derive === 'function') {
+                return data.derive({
+                    [fieldName]: d => {
+                        const values = data.get(sourceField).values();
+                        const index = data.get(sourceField).indices().indexOf(d[sourceField]);
+                        const start = Math.max(0, index - window + 1);
+                        const windowValues = values.slice(start, index + 1).filter(v => v != null);
+                        return windowValues.length > 0 ? windowValues.reduce((a, b) => a + b, 0) / windowValues.length : null;
+                    }
+                });
+            } else {
+                // Handle regular JavaScript array
+                return data.map((row, index) => {
+                    const newRow = { ...row };
                     const start = Math.max(0, index - window + 1);
-                    const windowValues = values.slice(start, index + 1).filter(v => v != null);
-                    
-                    if (windowValues.length === 0) return null;
-                    return windowValues.reduce((a, b) => a + b, 0) / windowValues.length;
-                }
-            });
+                    const windowValues = data.slice(start, index + 1)
+                        .map(r => r[sourceField])
+                        .filter(v => v != null);
+                    newRow[fieldName] = windowValues.length > 0 ? 
+                        windowValues.reduce((a, b) => a + b, 0) / windowValues.length : null;
+                    return newRow;
+                });
+            }
         } catch (error) {
             console.error('Error adding rolling mean field:', error);
             return data;
@@ -167,16 +215,29 @@ class ArrowQuery {
     // Add cumulative field
     addCumulativeField(data, fieldName, sourceField) {
         try {
-            let cumulative = 0;
-            
-            return data.derive({
-                [fieldName]: d => {
-                    if (d[sourceField] != null) {
-                        cumulative += d[sourceField];
+            // Check if it's an Arquero table
+            if (data && typeof data.derive === 'function') {
+                let cumulative = 0;
+                return data.derive({
+                    [fieldName]: d => {
+                        if (d[sourceField] != null) {
+                            cumulative += d[sourceField];
+                        }
+                        return cumulative;
                     }
-                    return cumulative;
-                }
-            });
+                });
+            } else {
+                // Handle regular JavaScript array
+                let cumulative = 0;
+                return data.map(row => {
+                    const newRow = { ...row };
+                    if (row[sourceField] != null) {
+                        cumulative += row[sourceField];
+                    }
+                    newRow[fieldName] = cumulative;
+                    return newRow;
+                });
+            }
         } catch (error) {
             console.error('Error adding cumulative field:', error);
             return data;

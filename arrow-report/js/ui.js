@@ -13,7 +13,7 @@ class ArrowUI {
     init() {
         this.setupEventListeners();
         this.updateStatus('Ready to load Arrow files');
-        this.plot.init();
+        this.plot.init('plotContainer');
     }
 
     setupEventListeners() {
@@ -282,22 +282,31 @@ class ArrowUI {
                 return;
             }
 
-            // Apply filters
-            const filteredData = this.query.applyFilters(this.currentData);
+            // Set the data in query module
+            this.query.setData(this.currentData);
+            
+            // Get filtered data
+            const filteredData = this.query.getFilteredData();
             
             // Apply derived fields
             const dataWithDerived = this.query.applyDerivedFields(filteredData);
 
-            // Get plot data
-            const plotData = this.query.getPlotData(dataWithDerived, xField, yField, colorField, chartType);
+            // Convert to array for plotting if it's an Arquero table
+            let plotData = dataWithDerived;
+            if (dataWithDerived && typeof dataWithDerived.objects === 'function') {
+                plotData = dataWithDerived.objects();
+            } else if (Array.isArray(dataWithDerived)) {
+                plotData = dataWithDerived;
+            }
 
             // Update plot
-            this.plot.updatePlot(plotData, {
+            this.plot.setConfig({
                 chartType,
                 xField,
                 yField,
                 colorField
             });
+            this.plot.updatePlot(plotData);
 
         } catch (error) {
             console.error('Error updating plot:', error);
