@@ -265,6 +265,8 @@ impl QueryWindow {
     
     fn execute_query(&mut self, db: Arc<Database>) {
         self.error = None;
+        // Reset to first page when executing a new query
+        self.page = 0;
         // self.is_executing = true; // This line was removed from imports, so it's removed here.
         
         match crate::core::QueryExecutor::execute_with_pagination(&db, &self.query, self.page, self.page_size) {

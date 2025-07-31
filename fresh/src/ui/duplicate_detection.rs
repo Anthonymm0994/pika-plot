@@ -2,20 +2,22 @@ use egui::{Ui, Window, Button, Checkbox, ComboBox, TextEdit, Label, ScrollArea, 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
-use crate::core::{Database, DuplicateDetector, DuplicateDetectionConfig, DuplicateDetectionResult, DuplicateBlock};
+use crate::core::{Database, DuplicateDetector, DuplicateDetectionConfig, DuplicateDetectionResult, duplicate_detector::DuplicateGroup};
 
 /// UI state for duplicate detection dialog
 pub struct DuplicateDetectionDialog {
     /// Whether the dialog is visible
     pub visible: bool,
+    /// Selected table name
+    pub selected_table: String,
+    /// Available tables in the database
+    pub available_tables: Vec<String>,
     /// Selected group column
     pub selected_group_column: String,
     /// Available columns in the current table
     pub available_columns: Vec<String>,
     /// Columns to ignore during comparison
     pub ignore_columns: HashSet<String>,
-    /// Block size for grouping rows
-    pub block_size: usize,
     /// Whether to treat null values as equal
     pub null_equals_null: bool,
     /// Current detection result
@@ -24,8 +26,6 @@ pub struct DuplicateDetectionDialog {
     pub is_detecting: bool,
     /// Error message if detection failed
     pub error_message: Option<String>,
-    /// Whether to show the results view
-    pub show_results: bool,
     /// Output directory for clean Arrow files
     pub output_directory: PathBuf,
     /// Success message after creating clean file
@@ -38,15 +38,15 @@ impl Default for DuplicateDetectionDialog {
     fn default() -> Self {
         Self {
             visible: false,
+            selected_table: String::new(),
+            available_tables: Vec::new(),
             selected_group_column: String::new(),
             available_columns: Vec::new(),
             ignore_columns: HashSet::new(),
-            block_size: 256,
             null_equals_null: true,
             detection_result: None,
             is_detecting: false,
             error_message: None,
-            show_results: false,
             output_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             success_message: None,
             show_success: false,
@@ -62,10 +62,11 @@ impl DuplicateDetectionDialog {
         }
 
         let mut visible = self.visible;
-        Window::new("Detect Duplicate Row Blocks")
+        Window::new("Detect Duplicate Groups")
             .open(&mut visible)
             .resizable(true)
             .default_size([600.0, 500.0])
+            .min_size([400.0, 300.0])
             .show(ctx, |ui| {
                 self.render_dialog(ui, db);
             });
@@ -78,6 +79,18 @@ impl DuplicateDetectionDialog {
         ui.heading("Configuration");
         ui.separator();
 
+        // Table selection
+        ui.horizontal(|ui| {
+            ui.label("Table:");
+            ComboBox::from_id_source("table_selection")
+                .selected_text(&self.selected_table)
+                .show_ui(ui, |ui| {
+                    for table in &self.available_tables {
+                        ui.selectable_value(&mut self.selected_table, table.clone(), table);
+                    }
+                });
+        });
+
         // Group column selection
         ui.horizontal(|ui| {
             ui.label("Group by column:");
@@ -88,16 +101,6 @@ impl DuplicateDetectionDialog {
                         ui.selectable_value(&mut self.selected_group_column, column.clone(), column);
                     }
                 });
-        });
-
-        // Block size configuration
-        ui.horizontal(|ui| {
-            ui.label("Block size:");
-            ui.add(TextEdit::singleline(&mut self.block_size.to_string())
-                .desired_width(80.0));
-            if let Ok(size) = self.block_size.to_string().parse::<usize>() {
-                self.block_size = size.max(1).min(1000);
-            }
         });
 
         // Null handling
@@ -113,18 +116,18 @@ impl DuplicateDetectionDialog {
             .max_height(150.0)
             .show(ui, |ui| {
                 Grid::new("ignore_columns_grid").show(ui, |ui| {
-                                            for column in &self.available_columns {
-                            if column != &self.selected_group_column {
-                                let mut is_ignored = self.ignore_columns.contains(column);
-                                if ui.checkbox(&mut is_ignored, column).clicked() {
-                                    if is_ignored {
-                                        self.ignore_columns.insert(column.clone());
-                                    } else {
-                                        self.ignore_columns.remove(column);
-                                    }
+                    for column in &self.available_columns {
+                        if column != &self.selected_group_column {
+                            let mut is_ignored = self.ignore_columns.contains(column);
+                            if ui.checkbox(&mut is_ignored, column).clicked() {
+                                if is_ignored {
+                                    self.ignore_columns.insert(column.clone());
+                                } else {
+                                    self.ignore_columns.remove(column);
                                 }
                             }
                         }
+                    }
                 });
             });
 
@@ -137,8 +140,8 @@ impl DuplicateDetectionDialog {
             }
 
             if let Some(_result) = &self.detection_result {
-                if ui.button("Show Results").clicked() {
-                    self.show_results = true;
+                if ui.button("Export Clean Arrow File").clicked() {
+                    self.export_clean_arrow_file(db);
                 }
             }
         });
@@ -157,15 +160,15 @@ impl DuplicateDetectionDialog {
             ui.separator();
             ui.heading("Detection Results");
             
-            ui.label(format!("Total duplicate blocks: {}", result.total_duplicates));
+            ui.label(format!("Total duplicate groups: {}", result.total_duplicates));
             ui.label(format!("Total duplicate rows: {}", result.total_duplicate_rows));
             ui.label(format!("Groups processed: {}", result.stats.groups_processed));
-            ui.label(format!("Blocks analyzed: {}", result.stats.blocks_analyzed));
-            ui.label(format!("Unique blocks found: {}", result.stats.unique_blocks));
+            ui.label(format!("Groups analyzed: {}", result.stats.groups_analyzed));
+            ui.label(format!("Unique groups found: {}", result.stats.unique_groups));
 
             if result.total_duplicates > 0 {
                 ui.separator();
-                ui.heading("Actions");
+                ui.heading("Export Options");
                 
                 // Output directory selection
                 ui.horizontal(|ui| {
@@ -180,21 +183,7 @@ impl DuplicateDetectionDialog {
                     }
                 });
 
-                // Action buttons
-                let result_clone = result.clone();
-                let should_remove = ui.button("🗑️ Remove from Database").clicked();
-                let should_create = ui.button("💾 Create Clean Arrow File").clicked();
-                
-                if should_remove {
-                    self.remove_duplicates(db, &result_clone);
-                }
-                
-                if should_create {
-                    self.create_clean_arrow_file(db, &result_clone);
-                }
-                
                 ui.label("💾 Creates a new Arrow file with duplicates removed");
-                ui.label("🗑️ Removes duplicates from the current database");
             }
         }
 
@@ -213,6 +202,11 @@ impl DuplicateDetectionDialog {
 
     /// Run the duplicate detection
     fn run_detection(&mut self, db: &Arc<Database>) {
+        if self.selected_table.is_empty() {
+            self.error_message = Some("Please select a table".to_string());
+            return;
+        }
+
         if self.selected_group_column.is_empty() {
             self.error_message = Some("Please select a group column".to_string());
             return;
@@ -221,27 +215,13 @@ impl DuplicateDetectionDialog {
         self.is_detecting = true;
         self.error_message = None;
 
-        // Get the database reference
-        let db_guard = db;
-        
-        // Get the first table (assuming single table for now)
-        let tables = db_guard.get_tables().unwrap_or_default();
-        if tables.is_empty() {
-            self.error_message = Some("No tables available".to_string());
-            self.is_detecting = false;
-            return;
-        }
-
-        let table_name = &tables[0].name;
-        
         // Load the table data using the non-mutable version
-        match db_guard.get_table_arrow_batch(table_name) {
+        match db.get_table_arrow_batch(&self.selected_table) {
             Ok(batch) => {
                 // Create detector configuration
                 let config = DuplicateDetectionConfig {
                     group_column: self.selected_group_column.clone(),
                     ignore_columns: self.ignore_columns.clone(),
-                    block_size: self.block_size,
                     null_equals_null: self.null_equals_null,
                 };
 
@@ -266,61 +246,39 @@ impl DuplicateDetectionDialog {
         self.is_detecting = false;
     }
 
-    /// Remove duplicates from the database
-    fn remove_duplicates(&mut self, db: &Arc<Database>, result: &DuplicateDetectionResult) {
-        let tables = db.get_tables().unwrap_or_default();
-        if tables.is_empty() {
-            self.error_message = Some("No tables available".to_string());
+    /// Export clean Arrow file
+    fn export_clean_arrow_file(&mut self, db: &Arc<Database>) {
+        if self.selected_table.is_empty() {
+            self.error_message = Some("No table selected".to_string());
             return;
         }
 
-        let table_name = &tables[0].name;
-        
-        // Create detector configuration
-        let config = DuplicateDetectionConfig {
-            group_column: self.selected_group_column.clone(),
-            ignore_columns: self.ignore_columns.clone(),
-            block_size: self.block_size,
-            null_equals_null: self.null_equals_null,
+        let result = match &self.detection_result {
+            Some(result) => result,
+            None => {
+                self.error_message = Some("No detection result available".to_string());
+                return;
+            }
         };
-
-        let detector = DuplicateDetector::new(config);
-        
-        // Note: Since we can't modify the Arc<Database> directly,
-        // we'll just show a message that this operation isn't supported
-        // in the current implementation
-        self.error_message = Some("Remove from database not supported in current implementation. Use 'Create Clean Arrow File' instead.".to_string());
-    }
-
-    /// Create a new Arrow file with duplicates removed
-    fn create_clean_arrow_file(&mut self, db: &Arc<Database>, result: &DuplicateDetectionResult) {
-        let tables = db.get_tables().unwrap_or_default();
-        if tables.is_empty() {
-            self.error_message = Some("No tables available".to_string());
-            return;
-        }
-
-        let table_name = &tables[0].name;
         
         // Create detector configuration
         let config = DuplicateDetectionConfig {
             group_column: self.selected_group_column.clone(),
             ignore_columns: self.ignore_columns.clone(),
-            block_size: self.block_size,
             null_equals_null: self.null_equals_null,
         };
 
         let detector = DuplicateDetector::new(config);
         
         // Load the table as Arrow batch using the non-mutable version
-        match db.get_table_arrow_batch(table_name) {
+        match db.get_table_arrow_batch(&self.selected_table) {
             Ok(batch) => {
                 // Create clean Arrow file
                 match detector.create_clean_arrow_file_with_path(
                     &batch,
                     result,
                     &self.output_directory,
-                    table_name,
+                    &self.selected_table,
                 ) {
                     Ok((output_path, kept_rows)) => {
                         self.success_message = Some(format!(
@@ -342,20 +300,32 @@ impl DuplicateDetectionDialog {
         }
     }
 
-    /// Update available columns from the database
-    pub fn update_available_columns(&mut self, db: &Arc<Database>) {
-        let db_guard = db;
-        let tables = db_guard.get_tables().unwrap_or_default();
+    /// Update available tables and columns from the database
+    pub fn update_available_tables_and_columns(&mut self, db: &Arc<Database>) {
+        let tables = db.get_tables().unwrap_or_default();
         
-        if let Some(table) = tables.first() {
+        // Update available tables
+        self.available_tables = tables.iter()
+            .map(|table| table.name.clone())
+            .collect();
+        
+        // If no table is selected and we have tables, select the first one
+        if self.selected_table.is_empty() && !self.available_tables.is_empty() {
+            self.selected_table = self.available_tables[0].clone();
+        }
+        
+        // Update available columns for the selected table
+        if let Some(table) = tables.iter().find(|t| t.name == self.selected_table) {
             self.available_columns = table.columns.iter()
                 .map(|col| col.name.clone())
                 .collect();
+        } else {
+            self.available_columns.clear();
         }
     }
 }
 
-/// Results viewer for duplicate blocks
+/// Results viewer for duplicate groups
 pub struct DuplicateResultsViewer {
     pub visible: bool,
     pub result: Option<DuplicateDetectionResult>,
@@ -380,10 +350,11 @@ impl DuplicateResultsViewer {
         let result = self.result.as_ref().unwrap().clone();
         let mut visible = self.visible;
 
-        Window::new("Duplicate Block Results")
+        Window::new("Duplicate Group Results")
             .open(&mut visible)
             .resizable(true)
             .default_size([800.0, 600.0])
+            .min_size([400.0, 300.0])
             .show(ctx, |ui| {
                 self.render_results(ui, &result, db);
             });
@@ -393,34 +364,34 @@ impl DuplicateResultsViewer {
 
     /// Render the results view
     fn render_results(&mut self, ui: &mut Ui, result: &DuplicateDetectionResult, db: &Arc<Database>) {
-        ui.heading(format!("Found {} Duplicate Blocks", result.total_duplicates));
+        ui.heading(format!("Found {} Duplicate Groups", result.total_duplicates));
         ui.separator();
 
         ScrollArea::vertical().show(ui, |ui| {
-            for (block_idx, block) in result.duplicate_blocks.iter().enumerate() {
+            for (group_idx, group) in result.duplicate_groups.iter().enumerate() {
                 CollapsingHeader::new(format!(
-                    "Block {} (Group: {}, {} occurrences)",
-                    block_idx + 1,
-                    block.group_id,
-                    block.row_indices.len()
+                    "Group {} (ID: {}, {} occurrences)",
+                    group_idx + 1,
+                    group.group_id,
+                    group.row_indices.len()
                 ))
                 .default_open(false)
                 .show(ui, |ui| {
-                    self.render_block_details(ui, block, db);
+                    self.render_group_details(ui, group, db);
                 });
             }
         });
     }
 
-    /// Render details for a specific block
-    fn render_block_details(&mut self, ui: &mut Ui, block: &DuplicateBlock, db: &Arc<Database>) {
-        ui.label(format!("Block Hash: {:x}", block.block_hash));
-        ui.label(format!("Group ID: {}", block.group_id));
-        ui.label(format!("Block Size: {}", block.block_size));
-        ui.label(format!("Occurrences: {}", block.row_indices.len()));
+    /// Render details for a specific group
+    fn render_group_details(&mut self, ui: &mut Ui, group: &DuplicateGroup, db: &Arc<Database>) {
+        ui.label(format!("Group Hash: {:x}", group.group_hash));
+        ui.label(format!("Group ID: {}", group.group_id));
+        ui.label(format!("Group Size: {}", group.group_size));
+        ui.label(format!("Occurrences: {}", group.row_indices.len()));
 
         // Show row indices for each occurrence
-        for (occurrence_idx, row_indices) in block.row_indices.iter().enumerate() {
+        for (occurrence_idx, row_indices) in group.row_indices.iter().enumerate() {
             CollapsingHeader::new(format!("Occurrence {}", occurrence_idx + 1))
                 .show(ui, |ui| {
                     ui.label(format!("Row indices: {:?}", row_indices));

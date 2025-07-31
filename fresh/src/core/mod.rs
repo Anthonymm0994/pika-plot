@@ -6,5 +6,5 @@ pub mod query;
 
 pub use database::{Database, TableInfo};
 pub use csv_handler::{CsvReader, CsvWriter};
-pub use duplicate_detector::{DuplicateDetector, DuplicateDetectionConfig, DuplicateDetectionResult, DuplicateBlock};
+pub use duplicate_detector::{DuplicateDetector, DuplicateDetectionConfig, DuplicateDetectionResult, DuplicateGroup};
 pub use query::{QueryResult, QueryExecutor}; 

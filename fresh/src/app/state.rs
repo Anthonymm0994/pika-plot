@@ -97,7 +97,7 @@ impl<'a> FreshApp<'a> {
                         SidebarAction::OpenDuplicateDetection => {
                             self.duplicate_detection_dialog.visible = true;
                             if let Some(db) = &self.database {
-                                self.duplicate_detection_dialog.update_available_columns(db);
+                                self.duplicate_detection_dialog.update_available_tables_and_columns(db);
                             }
                         }
                         SidebarAction::None => {}
