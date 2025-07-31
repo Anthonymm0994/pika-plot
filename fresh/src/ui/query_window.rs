@@ -100,25 +100,47 @@ impl QueryWindow {
                         ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_gray(18);
                         ui.set_max_height(available_height);
                         
-                        // Results header
-                        ui.horizontal(|ui| {
-                            let total_rows = results.total_rows.unwrap_or(results.rows.len());
-                            ui.label(format!(
-                                "Results: {} rows (showing {}-{})",
-                                total_rows,
-                                self.page * self.page_size + 1,
-                                ((self.page + 1) * self.page_size).min(total_rows)
-                            ));
-                        });
+                                                 // Results header
+                         ui.horizontal(|ui| {
+                             let total_rows = results.total_rows.unwrap_or(results.rows.len());
+                             let actual_rows_returned = results.rows.len();
+                             
+                             ui.label(format!(
+                                 "Results: {} rows (showing {}-{} of page {})",
+                                 total_rows,
+                                 self.page * self.page_size + 1,
+                                 self.page * self.page_size + actual_rows_returned,
+                                 self.page + 1
+                             ));
+                         });
                         
                         ui.separator();
                         
-                        // Results table with scroll
-                        egui::ScrollArea::both()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                self.render_results_table(ui, results);
-                            });
+                                                 // Results table with scroll - calculate height based on page size and content
+                         let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+                         // Use a more realistic row height that accounts for table padding and spacing
+                         // For small page sizes, use less padding to avoid excessive height
+                         let padding = if self.page_size <= 5 { 8.0 } else { 12.0 };
+                         let row_height = text_height + padding;
+                         let header_height = 24.0; // Increased header height to match actual table
+                         
+                         // Calculate height based on page size, not actual rows returned
+                         // This ensures consistent table height even when fewer rows are returned
+                         let rows_to_show = self.page_size;
+                         
+                         // Calculate the ideal table height needed for the full page size
+                         let ideal_table_height = rows_to_show as f32 * row_height + header_height;
+                         
+                         // Use the ideal height directly, but ensure it's at least 1 row height
+                         // This prevents layout assertion failures when minimized
+                         let table_height = ideal_table_height.max(row_height + header_height);
+                         
+                         egui::ScrollArea::both()
+                             .auto_shrink([false, false])
+                             .max_height(table_height)
+                             .show(ui, |ui| {
+                                 self.render_results_table(ui, results);
+                             });
                     });
                 }
                 
@@ -155,14 +177,19 @@ impl QueryWindow {
                             
                             ui.separator();
                             
-                            ui.label("Page size:");
-                            egui::ComboBox::from_label("page_size")
-                                .selected_text(self.page_size.to_string())
-                                .show_ui(ui, |ui| {
-                                    for size in &[10, 25, 50, 100, 500] {
-                                        ui.selectable_value(&mut self.page_size, *size, size.to_string());
-                                    }
-                                });
+                                                         ui.label("Page size:");
+                             let mut page_size_str = self.page_size.to_string();
+                             if ui.add(egui::TextEdit::singleline(&mut page_size_str)
+                                 .desired_width(60.0)
+                                 .hint_text("25")).changed() {
+                                 if let Ok(new_size) = page_size_str.parse::<usize>() {
+                                     if new_size > 0 && new_size <= 10000 {
+                                         self.page_size = new_size;
+                                         // Re-execute query with new page size
+                                         self.execute_query(db.clone());
+                                     }
+                                 }
+                             }
                         });
                         
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

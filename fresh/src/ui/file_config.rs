@@ -113,6 +113,34 @@ impl FileConfigDialog {
         row.push(current_field.trim().to_string());
         row
     }
+
+    /// Infer the most likely delimiter from a header line
+    fn infer_delimiter_from_header(header_line: &str) -> char {
+        let delimiters = [',', '\t', ';', '|'];
+        let mut best_delimiter = ',';
+        let mut max_fields = 0;
+        
+        for &delimiter in &delimiters {
+            let fields = Self::parse_csv_line(header_line, delimiter);
+            if fields.len() > max_fields && fields.len() > 1 {
+                max_fields = fields.len();
+                best_delimiter = delimiter;
+            }
+        }
+        
+        best_delimiter
+    }
+
+    /// Get the display name for a delimiter
+    fn delimiter_display_name(delimiter: char) -> &'static str {
+        match delimiter {
+            ',' => "Comma",
+            '\t' => "Tab", 
+            ';' => "Semicolon",
+            '|' => "Pipe",
+            _ => "Unknown"
+        }
+    }
     
     pub fn new() -> Self {
         Self {
@@ -505,6 +533,30 @@ impl FileConfigDialog {
                             // Delimiter
                             ui.horizontal(|ui| {
                                 ui.label("Delimiter:");
+                                
+                                // Try to infer delimiter from header if we have preview data
+                                let inferred_delimiter = if let Some(ref preview) = config.preview_data {
+                                    if let Some(header_line) = preview.rows.get(config.header_row.saturating_sub(1)) {
+                                        if let Some(header_str) = header_line.get(0) {
+                                            Self::infer_delimiter_from_header(header_str)
+                                        } else {
+                                            ','
+                                        }
+                                    } else {
+                                        ','
+                                    }
+                                } else {
+                                    ','
+                                };
+                                
+                                // Show inferred delimiter if it's different from current selection
+                                if inferred_delimiter != config.delimiter {
+                                    ui.label(format!("Inferred: {}", Self::delimiter_display_name(inferred_delimiter)));
+                                    if ui.button("Use Inferred").clicked() {
+                                        config.delimiter = inferred_delimiter;
+                                    }
+                                }
+                                
                                 ui.radio_value(&mut config.delimiter, ',', "Comma");
                                 ui.radio_value(&mut config.delimiter, '\t', "Tab");
                                 ui.radio_value(&mut config.delimiter, ';', "Semicolon");
@@ -852,7 +904,7 @@ impl FileConfigDialog {
     
     fn start_database_creation(&mut self) -> Option<PathBuf> {
         let db_path = self.database_path.clone()?;
-        let files = self.files.clone();
+        let mut files = self.files.clone();
         
         // For DataFusion, we need to create the database synchronously
         // since it's in-memory and we need to return the actual database instance
@@ -864,11 +916,19 @@ impl FileConfigDialog {
                 // Skip pre-creating tables - let stream_insert_csv handle schema creation from CSV headers
                 
                 // Import data for each file
-                for (file_idx, config) in files.iter().enumerate() {
+                for (file_idx, config) in files.iter_mut().enumerate() {
                     // Use enhanced streaming import with custom header row
-                    if let Err(e) = db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
-                        self.error = Some(format!("Failed to import {}: {}", config.file_name(), e));
-                        return None;
+                    match db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
+                        Ok(inferred_delimiter) => {
+                            // Update the config with the inferred delimiter if it was auto-detected
+                            if config.delimiter == ',' {
+                                config.delimiter = inferred_delimiter;
+                            }
+                        }
+                        Err(e) => {
+                            self.error = Some(format!("Failed to import {}: {}", config.file_name(), e));
+                            return None;
+                        }
                     }
                 }
                 
@@ -890,7 +950,7 @@ impl FileConfigDialog {
     
     fn create_database_in_thread(
         db_path: PathBuf,
-        files: Vec<FileConfig>,
+        mut files: Vec<FileConfig>,
         processing_state: Arc<Mutex<ProcessingState>>
     ) {
         // Update state to processing
@@ -908,7 +968,7 @@ impl FileConfigDialog {
                 // Skip pre-creating tables - let stream_insert_csv handle schema creation from CSV headers
                 
                 // Now import data for each file
-                for (file_idx, config) in files.iter().enumerate() {
+                for (file_idx, config) in files.iter_mut().enumerate() {
                     // Update initial progress for this file
                     if let Ok(mut state) = processing_state.lock() {
                         *state = ProcessingState::Processing(
@@ -918,12 +978,20 @@ impl FileConfigDialog {
                     }
                     
                     // Use enhanced streaming import with custom header row
-                    if let Err(e) = db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
-                        if let Ok(mut state) = processing_state.lock() {
-                            *state = ProcessingState::Error(format!("Failed to import {}: {}", config.file_name(), e));
+                    match db.stream_insert_csv_with_header_row(&config.table_name, &config.path, config.delimiter, config.header_row.saturating_sub(1)) {
+                        Ok(inferred_delimiter) => {
+                            // Update the config with the inferred delimiter if it was auto-detected
+                            if config.delimiter == ',' {
+                                config.delimiter = inferred_delimiter;
+                            }
                         }
-                        let _ = db.rollback_transaction();
-                        return;
+                        Err(e) => {
+                            if let Ok(mut state) = processing_state.lock() {
+                                *state = ProcessingState::Error(format!("Failed to import {}: {}", config.file_name(), e));
+                            }
+                            let _ = db.rollback_transaction();
+                            return;
+                        }
                     }
                     
                     // Final progress update for this file

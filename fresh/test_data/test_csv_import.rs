@@ -14,8 +14,9 @@ fn main() {
     // Test with skip_lines = 2 and header_row = 1 (0-indexed, so row 2)
     println!("Importing with skip_lines=2, header_row=1 (0-indexed)");
     match db.stream_insert_csv_with_header_row("test_table", csv_path, ',', 1, 2) {
-        Ok(_) => {
+        Ok(inferred_delimiter) => {
             println!("✅ Successfully imported CSV with enhanced functionality!");
+            println!("Inferred delimiter: {}", inferred_delimiter);
             
             // Try to query the table to verify it worked
             match db.execute_query("SELECT * FROM test_table LIMIT 5") {

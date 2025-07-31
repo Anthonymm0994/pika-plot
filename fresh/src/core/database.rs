@@ -103,6 +103,141 @@ impl Database {
         row
     }
 
+    /// Normalize time data by padding all entries to the highest precision found
+    /// Parse a time string in HH:MM:SS format to a timestamp in the specified unit
+    fn parse_time_string_to_timestamp(time_str: &str, unit: &TimeUnit) -> Option<i64> {
+        let parts: Vec<&str> = time_str.split(':').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        
+        // Parse hours, minutes, seconds
+        let hour = parts[0].parse::<u8>().ok()?;
+        let minute = parts[1].parse::<u8>().ok()?;
+        let seconds_part = parts[2];
+        
+        // Parse seconds and optional fractional part
+        let (second, fraction) = if let Some(dot_pos) = seconds_part.find('.') {
+            let second_str = &seconds_part[..dot_pos];
+            let fraction_str = &seconds_part[dot_pos + 1..];
+            let second = second_str.parse::<u8>().ok()?;
+            let fraction = fraction_str.parse::<u64>().unwrap_or(0);
+            (second, fraction)
+        } else {
+            let second = seconds_part.parse::<u8>().ok()?;
+            (second, 0)
+        };
+        
+        // Validate time components
+        if hour >= 24 || minute >= 60 || second >= 60 {
+            return None;
+        }
+        
+        // Calculate total seconds since midnight
+        let total_seconds = hour as i64 * 3600 + minute as i64 * 60 + second as i64;
+        
+        // Convert to the requested unit
+        let timestamp = match unit {
+            TimeUnit::Second => total_seconds,
+            TimeUnit::Millisecond => total_seconds * 1_000 + (fraction / 1_000_000) as i64,
+            TimeUnit::Microsecond => total_seconds * 1_000_000 + (fraction / 1_000) as i64,
+            TimeUnit::Nanosecond => total_seconds * 1_000_000_000 + fraction as i64,
+        };
+        
+        Some(timestamp)
+    }
+
+    fn normalize_time_column(values: &[String]) -> Vec<String> {
+        let mut max_fraction_digits = 0;
+        
+        // First pass: find the maximum fraction digits
+        for value in values {
+            if value.is_empty() || value.to_lowercase() == "null" {
+                continue;
+            }
+            
+            let parts: Vec<&str> = value.split(':').collect();
+            if parts.len() == 3 {
+                let seconds_part = parts[2];
+                if let Some(dot_pos) = seconds_part.find('.') {
+                    let fraction_str = &seconds_part[dot_pos + 1..];
+                    max_fraction_digits = max_fraction_digits.max(fraction_str.len());
+                }
+            }
+        }
+        
+        // Second pass: pad all values to the maximum precision
+        let mut normalized_values = Vec::new();
+        for value in values {
+            if value.is_empty() || value.to_lowercase() == "null" {
+                normalized_values.push(value.clone());
+                continue;
+            }
+            
+            let parts: Vec<&str> = value.split(':').collect();
+            if parts.len() == 3 {
+                let seconds_part = parts[2];
+                if let Some(dot_pos) = seconds_part.find('.') {
+                    // Has fractional part - pad to max precision
+                    let seconds_str = &seconds_part[..dot_pos];
+                    let fraction_str = &seconds_part[dot_pos + 1..];
+                    let padded_fraction = format!("{:0<width$}", fraction_str, width = max_fraction_digits);
+                    normalized_values.push(format!("{}:{}:{}.{}", parts[0], parts[1], seconds_str, padded_fraction));
+                } else {
+                    // No fractional part - add zeros
+                    let padded_fraction = "0".repeat(max_fraction_digits);
+                    normalized_values.push(format!("{}:{}:{}.{}", parts[0], parts[1], seconds_part, padded_fraction));
+                }
+            } else {
+                // Not a valid time format, keep as is
+                normalized_values.push(value.clone());
+            }
+        }
+        
+        normalized_values
+    }
+
+    /// Infer the most likely delimiter from a header line
+    fn infer_delimiter_from_header(header_line: &str) -> char {
+        let delimiters = [',', '\t', ';', '|'];
+        let mut best_delimiter = ',';
+        let mut max_fields = 0;
+        
+        for &delimiter in &delimiters {
+            let fields = Self::parse_csv_line(header_line, delimiter);
+            if fields.len() > max_fields && fields.len() > 1 {
+                max_fields = fields.len();
+                best_delimiter = delimiter;
+            }
+        }
+        
+        best_delimiter
+    }
+
+    /// Check if a line appears to be valid CSV data based on delimiter
+    fn is_valid_csv_line(line: &str, delimiter: char, expected_columns: usize) -> bool {
+        // Skip empty lines
+        if line.trim().is_empty() {
+            return false;
+        }
+        
+        // Skip comment lines
+        if line.trim().starts_with('#') {
+            return false;
+        }
+        
+        // Parse the line and check if it has the expected number of columns
+        let fields = Self::parse_csv_line(line, delimiter);
+        
+        // If we have a specific expected column count, validate against it
+        if expected_columns > 0 {
+            return fields.len() == expected_columns;
+        }
+        
+        // Otherwise, just check if it has multiple fields (at least 2)
+        fields.len() >= 2
+    }
+
     fn parse_date_string(date_str: &str) -> Option<i32> {
         // Parse date in YYYY-MM-DD format
         let parts: Vec<&str> = date_str.split('-').collect();
@@ -661,22 +796,27 @@ impl Database {
                             if value.is_empty() || value.to_lowercase() == "null" || value == "-" || value.to_lowercase() == "n/a" {
                                 timestamp_values.push(None);
                             } else {
-                                // Try to parse as timestamp
-                                match value.parse::<i64>() {
-                                    Ok(ts) => {
-                                        // Convert to the correct unit
-                                        let converted_ts = match unit {
-                                            TimeUnit::Second => ts,
-                                            TimeUnit::Millisecond => ts * 1_000,
-                                            TimeUnit::Microsecond => ts * 1_000_000,
-                                            TimeUnit::Nanosecond => ts * 1_000_000_000,
-                                        };
-                                        timestamp_values.push(Some(converted_ts));
-                                    }
-                                    Err(_) => {
-                                        // If not a number, try to parse as date string
-                                        // For now, just store as null if we can't parse
-                                        timestamp_values.push(None);
+                                // Try to parse time string in HH:MM:SS format
+                                if let Some(timestamp) = Self::parse_time_string_to_timestamp(value, unit) {
+                                    timestamp_values.push(Some(timestamp));
+                                } else {
+                                    // Try to parse as regular timestamp number
+                                    match value.parse::<i64>() {
+                                        Ok(ts) => {
+                                            // Convert to the correct unit
+                                            let converted_ts = match unit {
+                                                TimeUnit::Second => ts,
+                                                TimeUnit::Millisecond => ts * 1_000,
+                                                TimeUnit::Microsecond => ts * 1_000_000,
+                                                TimeUnit::Nanosecond => ts * 1_000_000_000,
+                                            };
+                                            timestamp_values.push(Some(converted_ts));
+                                        }
+                                        Err(_) => {
+                                            // If not a number, try to parse as date string
+                                            // For now, just store as null if we can't parse
+                                            timestamp_values.push(None);
+                                        }
                                     }
                                 }
                             }
@@ -932,7 +1072,7 @@ impl Database {
     }
 
     /// Enhanced CSV import that can skip lines and select a specific row as header
-    pub fn stream_insert_csv_with_header_row(&mut self, table_name: &str, csv_path: &Path, delimiter: char, header_row: usize) -> Result<()> {
+    pub fn stream_insert_csv_with_header_row(&mut self, table_name: &str, csv_path: &Path, delimiter: char, header_row: usize) -> Result<char> {
         use std::io::{BufRead, BufReader};
         use std::fs::File;
         
@@ -964,27 +1104,21 @@ impl Database {
             return Err(FreshError::Custom("No header row found".to_string()));
         };
         
-        // Parse data rows (skip the header row) and filter garbage
+        // Infer delimiter from header if not already specified
+        let inferred_delimiter = if delimiter == ',' {
+            Self::infer_delimiter_from_header(&data_lines[0])
+        } else {
+            delimiter
+        };
+        
+        // Parse data rows (skip the header row) and filter using delimiter-based validation
         let mut rows = Vec::new();
+        let expected_columns = headers.len();
+        
         for line in data_lines.iter().skip(1) {
-            // Skip comment lines (lines starting with #)
-            if line.trim().starts_with('#') {
-                continue;
-            }
-            
-            let row = Self::parse_csv_line(line, delimiter);
-            
-            // Skip empty rows and obvious garbage rows
-            let is_garbage = row.iter().all(|cell| cell.is_empty()) ||
-                           row.iter().any(|cell| {
-                               let cell_lower = cell.to_lowercase();
-                               cell_lower.contains("fake line") ||
-                               cell_lower.contains("ignore this") ||
-                               cell_lower.contains("data starts here") ||
-                               cell_lower.contains("realistic patterns")
-                           });
-            
-            if !is_garbage {
+            // Use delimiter-based validation instead of hardcoded string checks
+            if Self::is_valid_csv_line(line, inferred_delimiter, expected_columns) {
+                let row = Self::parse_csv_line(line, inferred_delimiter);
                 rows.push(row);
             }
         }
@@ -1053,8 +1187,34 @@ impl Database {
         
         let schema = Schema::new(fields);
         
+        // Apply time normalization to columns that are detected as time types
+        let mut normalized_rows = rows.clone();
+        for (col_idx, (name, col_type)) in inferred_types.iter().enumerate() {
+            if col_type.is_time_type() {
+                // Extract column values
+                let mut column_values = Vec::new();
+                for row in &normalized_rows {
+                    if col_idx < row.len() {
+                        column_values.push(row[col_idx].clone());
+                    } else {
+                        column_values.push(String::new());
+                    }
+                }
+                
+                // Normalize the time column
+                let normalized_values = Self::normalize_time_column(&column_values);
+                
+                // Update the rows with normalized values
+                for (row_idx, normalized_value) in normalized_values.iter().enumerate() {
+                    if row_idx < normalized_rows.len() && col_idx < normalized_rows[row_idx].len() {
+                        normalized_rows[row_idx][col_idx] = normalized_value.clone();
+                    }
+                }
+            }
+        }
+        
         // Convert rows to Arrow arrays using the same type inference
-        let arrays = self.string_rows_to_arrow_arrays_with_schema(&final_headers, &rows, &schema)?;
+        let arrays = self.string_rows_to_arrow_arrays_with_schema(&final_headers, &normalized_rows, &schema)?;
         
         let batch = RecordBatch::try_new(Arc::new(schema), arrays)
             .map_err(|e| FreshError::Custom(format!("Failed to create record batch: {}", e)))?;
@@ -1065,7 +1225,7 @@ impl Database {
         // Store in our cache
         self.registered_tables.insert(table_name.to_string(), Arc::new(batch));
         
-        Ok(())
+        Ok(inferred_delimiter)
     }
 
     pub fn begin_transaction(&mut self) -> Result<()> {

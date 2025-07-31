@@ -33,6 +33,38 @@ pollster = "0.3"
 
 
 
+[[bin]]
+name = "test_time_detection"
+path = "test_data/test_time_detection.rs"
+
+[[bin]]
+name = "test_time_normalization"
+path = "test_data/test_time_normalization.rs"
+
+[[bin]]
+name = "test_fixes"
+path = "test_data/test_fixes.rs"
+
+[[bin]]
+name = "test_ui_fixes"
+path = "test_data/test_ui_fixes.rs"
+
+[[bin]]
+name = "debug_table_height"
+path = "test_data/debug_table_height.rs"
+
+[[bin]]
+name = "test_height_fixes"
+path = "test_data/test_height_fixes.rs"
+
+[[bin]]
+name = "debug_time_import"
+path = "test_data/debug_time_import.rs"
+
+[[bin]]
+name = "test_csv_import_debug"
+path = "test_data/test_csv_import_debug.rs"
+
 [profile.release]
 opt-level = 3
 lto = true 

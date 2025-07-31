@@ -97,6 +97,47 @@ def generate_time_with_null_probability(null_prob: float = 0.02) -> str:
     second = random.randint(0, 59)
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
+def generate_time_milliseconds_with_null_probability(null_prob: float = 0.02) -> str:
+    """Generate time with milliseconds precision and chance of null values"""
+    if random.random() < null_prob:
+        null_types = ['', 'null', 'NULL', '-', 'N/A']
+        return random.choice(null_types)
+    
+    hour = random.randint(0, 23)
+    minute = random.randint(0, 59)
+    second = random.randint(0, 59)
+    millisecond = random.randint(0, 999)
+    return f"{hour:02d}:{minute:02d}:{second:02d}.{millisecond:03d}"
+
+def generate_time_microseconds_with_null_probability(null_prob: float = 0.02) -> str:
+    """Generate time with microseconds precision and chance of null values"""
+    if random.random() < null_prob:
+        null_types = ['', 'null', 'NULL', '-', 'N/A']
+        return random.choice(null_types)
+    
+    hour = random.randint(0, 23)
+    minute = random.randint(0, 59)
+    second = random.randint(0, 59)
+    microsecond = random.randint(0, 999999)
+    return f"{hour:02d}:{minute:02d}:{second:02d}.{microsecond:06d}"
+
+def generate_time_mixed_precision_with_null_probability(null_prob: float = 0.02) -> str:
+    """Generate time with mixed precision (some with milliseconds, some without) and chance of null values"""
+    if random.random() < null_prob:
+        null_types = ['', 'null', 'NULL', '-', 'N/A']
+        return random.choice(null_types)
+    
+    hour = random.randint(0, 23)
+    minute = random.randint(0, 59)
+    second = random.randint(0, 59)
+    
+    # 70% chance of seconds only, 30% chance of milliseconds
+    if random.random() < 0.7:
+        return f"{hour:02d}:{minute:02d}:{second:02d}"
+    else:
+        millisecond = random.randint(0, 999)
+        return f"{hour:02d}:{minute:02d}:{second:02d}.{millisecond:03d}"
+
 def generate_datetime_with_null_probability(start_date: datetime.date, end_date: datetime.date, null_prob: float = 0.01) -> str:
     """Generate datetime with chance of null values"""
     if random.random() < null_prob:
@@ -219,8 +260,11 @@ def generate_row(user_id: int) -> List[str]:
     registration_date = generate_date_with_null_probability(start_date, end_date, 0.01)
     join_date = registration_date  # Usually same as registration
     
-    # Times
+    # Times with different precision levels
     last_login_time = generate_time_with_null_probability(0.02)
+    session_start_time = generate_time_milliseconds_with_null_probability(0.02)
+    api_response_time = generate_time_microseconds_with_null_probability(0.02)
+    mixed_precision_time = generate_time_mixed_precision_with_null_probability(0.02)
     
     # Datetimes
     created_at = generate_datetime_with_null_probability(start_date, end_date, 0.01)
@@ -268,6 +312,9 @@ def generate_row(user_id: int) -> List[str]:
         is_active,
         registration_date,
         last_login_time,
+        session_start_time,
+        api_response_time,
+        mixed_precision_time,
         premium_tier,
         country_code,
         score,
@@ -303,7 +350,8 @@ def main():
     # Headers
     headers = [
         'user_id', 'age', 'income', 'is_active', 'registration_date', 'last_login_time',
-        'premium_tier', 'country_code', 'score', 'rating', 'has_verified_email', 'username',
+        'session_start_time', 'api_response_time', 'mixed_precision_time', 'premium_tier', 
+        'country_code', 'score', 'rating', 'has_verified_email', 'username',
         'created_at', 'login_count', 'subscription_type', 'payment_method', 'account_balance',
         'monthly_spend', 'is_premium', 'email_domain', 'join_date', 'timezone',
         'last_purchase_date', 'referral_source', 'device_type', 'os_version', 'app_version',

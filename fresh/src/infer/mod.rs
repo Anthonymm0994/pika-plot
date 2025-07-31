@@ -65,6 +65,15 @@ impl ColumnType {
         }
     }
 
+    pub fn is_time_type(&self) -> bool {
+        matches!(self,
+            ColumnType::TimeSeconds |
+            ColumnType::TimeMilliseconds |
+            ColumnType::TimeMicroseconds |
+            ColumnType::TimeNanoseconds
+        )
+    }
+
     // Check if a value can be converted to this type
     pub fn can_parse_value(&self, value: &str) -> bool {
         if value.is_empty() || value.to_lowercase() == "null" {
@@ -208,7 +217,8 @@ impl TypeInferrer {
         } else if is_date {
             ColumnType::Date
         } else if is_time {
-            ColumnType::TimeSeconds
+            // Determine the appropriate time unit based on the data
+            Self::detect_time_unit_from_data(samples, col_idx)
         } else {
             ColumnType::Text
         }
@@ -304,7 +314,8 @@ impl TypeInferrer {
         } else if is_date {
             ColumnType::Date
         } else if is_time {
-            ColumnType::TimeSeconds
+            // Determine the appropriate time unit based on the data
+            Self::detect_time_unit_from_data(samples, col_idx)
         } else {
             ColumnType::Text
         }
@@ -335,6 +346,36 @@ impl TypeInferrer {
         }
         
         None
+    }
+
+    fn detect_time_unit_from_data(samples: &[Vec<String>], col_idx: usize) -> ColumnType {
+        let mut max_fraction_digits = 0;
+        
+        for row in samples {
+            if let Some(value) = row.get(col_idx) {
+                if value.is_empty() || value.to_lowercase() == "null" {
+                    continue;
+                }
+                
+                // Check for fractional part in time format
+                let parts: Vec<&str> = value.split(':').collect();
+                if parts.len() == 3 {
+                    let seconds_part = parts[2];
+                    if let Some(dot_pos) = seconds_part.find('.') {
+                        let fraction_str = &seconds_part[dot_pos + 1..];
+                        max_fraction_digits = max_fraction_digits.max(fraction_str.len());
+                    }
+                }
+            }
+        }
+        
+        // Determine time unit based on fraction digits
+        match max_fraction_digits {
+            0 => ColumnType::TimeSeconds,      // No fraction
+            1..=3 => ColumnType::TimeMilliseconds,  // 1-3 digits (e.g., .3, .32, .325)
+            4..=6 => ColumnType::TimeMicroseconds,  // 4-6 digits (e.g., .3250, .325000)
+            _ => ColumnType::TimeSeconds,      // Default fallback
+        }
     }
     
     fn is_date(value: &str) -> bool {
@@ -390,16 +431,42 @@ impl TypeInferrer {
     }
 
     fn is_time(value: &str) -> bool {
-        // Check for HH:MM:SS format
+        // Check for HH:MM:SS format (with optional milliseconds/microseconds)
         let parts: Vec<&str> = value.split(':').collect();
         if parts.len() == 3 {
-            // Should be HH:MM:SS
-            if let (Ok(hour), Ok(minute), Ok(second)) = (
+            // Should be HH:MM:SS or HH:MM:SS.mmm or HH:MM:SS.mmmmmm
+            if let (Ok(hour), Ok(minute)) = (
                 parts[0].parse::<u8>(),
-                parts[1].parse::<u8>(),
-                parts[2].parse::<u8>()
+                parts[1].parse::<u8>()
             ) {
-                return hour < 24 && minute < 60 && second < 60;
+                if hour >= 24 || minute >= 60 {
+                    return false;
+                }
+                
+                // Parse seconds part (may include milliseconds/microseconds)
+                let seconds_part = parts[2];
+                if let Some(dot_pos) = seconds_part.find('.') {
+                    // Has fractional part
+                    let seconds_str = &seconds_part[..dot_pos];
+                    let fraction_str = &seconds_part[dot_pos + 1..];
+                    
+                    if let Ok(second) = seconds_str.parse::<u8>() {
+                        if second >= 60 {
+                            return false;
+                        }
+                        
+                        // Check if fraction is valid (1-6 digits for milliseconds/microseconds)
+                        if fraction_str.len() >= 1 && fraction_str.len() <= 6 && 
+                           fraction_str.chars().all(|c| c.is_ascii_digit()) {
+                            return true;
+                        }
+                    }
+                } else {
+                    // No fractional part
+                    if let Ok(second) = seconds_part.parse::<u8>() {
+                        return second < 60;
+                    }
+                }
             }
         } else if parts.len() == 2 {
             // Should be HH:MM
