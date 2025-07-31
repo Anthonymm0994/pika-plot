@@ -1,118 +1,110 @@
-use std::sync::Arc;
-use fresh::core::{Database, DuplicateDetector, DuplicateDetectionConfig};
+use fresh::core::{DuplicateDetector, DuplicateDetectionConfig};
 use std::collections::HashSet;
+use datafusion::arrow::array::{StringArray, Int64Array};
+use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::record_batch::RecordBatch;
+use std::sync::Arc;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🧪 Testing Duplicate Detection Feature");
-    println!("=====================================");
-
-    // Test 1: Simple duplicates
-    println!("\n📁 Test 1: Simple duplicates (simple_duplicates.csv)");
-    test_file("test_data/simple_duplicates.csv")?;
-
-    // Test 2: Mixed data types
-    println!("\n📁 Test 2: Mixed data types (mixed_data.csv)");
-    test_file("test_data/mixed_data.csv")?;
-
-    // Test 3: Large dataset
-    println!("\n📁 Test 3: Large dataset (large_dataset.csv)");
-    test_file("test_data/large_dataset.csv")?;
-
-    println!("\n✅ All tests completed successfully!");
-    Ok(())
-}
-
-fn test_file(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Create database and load CSV
-    let mut db = Database::new()?;
-    db.load_csv_file(file_path)?;
-
-    // Get table info
-    let tables = db.get_tables()?;
-    if tables.is_empty() {
-        println!("❌ No tables found in {}", file_path);
-        return Ok(());
-    }
-
-    let table_name = &tables[0].name;
-    println!("📊 Table: {} ({} columns)", table_name, tables[0].columns.len());
-
-    // Get available columns
-    let available_columns: Vec<String> = tables[0].columns.iter()
-        .map(|col| col.name.clone())
-        .collect();
+fn main() {
+    // Create test data where two groups have identical content but different group IDs
+    let group_ids = vec!["group1", "group1", "group2", "group2"];
+    let names = vec!["Alice", "Bob", "Alice", "Bob"];
+    let ages = vec![25, 30, 25, 30];
+    let jobs = vec!["Engineer", "Manager", "Engineer", "Manager"];
+    let dates = vec!["2023-01-01", "2023-01-02", "2023-01-01", "2023-01-02"]; // Same dates!
     
-    println!("📋 Available columns: {:?}", available_columns);
-
-    // Test with different configurations
-    let test_configs = vec![
-        ("Basic test (group by group_id, ignore id)", 
-         DuplicateDetectionConfig {
-             group_column: "group_id".to_string(),
-             ignore_columns: HashSet::from(["id".to_string()]),
-             block_size: 256,
-             null_equals_null: true,
-         }),
-        ("Test with smaller block size", 
-         DuplicateDetectionConfig {
-             group_column: "group_id".to_string(),
-             ignore_columns: HashSet::from(["id".to_string()]),
-             block_size: 2,
-             null_equals_null: true,
-         }),
-        ("Test ignoring timestamp columns", 
-         DuplicateDetectionConfig {
-             group_column: "group_id".to_string(),
-             ignore_columns: HashSet::from(["id".to_string(), "timestamp".to_string(), "last_login".to_string(), "hire_date".to_string()]),
-             block_size: 256,
-             null_equals_null: true,
-         }),
-    ];
-
-    for (test_name, config) in test_configs {
-        println!("\n🔍 {}", test_name);
-        
-        // Load table data
-        let batch = db.get_table_arrow_batch(table_name)?;
-        println!("📈 Loaded {} rows", batch.num_rows());
-
-        // Create detector and run detection
-        let detector = DuplicateDetector::new(config);
-        match detector.detect_duplicates(&batch) {
-            Ok(result) => {
-                println!("✅ Detection completed successfully");
-                println!("   📊 Groups processed: {}", result.stats.groups_processed);
-                println!("   📊 Blocks analyzed: {}", result.stats.blocks_analyzed);
-                println!("   📊 Unique blocks found: {}", result.stats.unique_blocks);
-                println!("   📊 Total duplicate blocks: {}", result.total_duplicates);
-                println!("   📊 Total duplicate rows: {}", result.total_duplicate_rows);
-
-                if result.total_duplicates > 0 {
-                    println!("   🔍 Found duplicate blocks:");
-                    for (i, block) in result.duplicate_blocks.iter().enumerate() {
-                        println!("      Block {}: Group '{}', {} occurrences, {} rows each", 
-                                i + 1, block.group_id, block.row_indices.len(), block.block_size);
-                    }
-
-                    // Test creating clean Arrow file
-                    let output_path = format!("test_data/{}_clean.arrow", table_name);
-                    match detector.create_clean_arrow_file(&batch, &result, std::path::Path::new(&output_path)) {
-                        Ok(kept_rows) => {
-                            println!("   💾 Created clean Arrow file: {} (kept {} rows)", output_path, kept_rows);
-                        }
-                        Err(e) => {
-                            println!("   ❌ Failed to create clean Arrow file: {}", e);
-                        }
-                    }
-                } else {
-                    println!("   ✅ No duplicates found");
-                }
-            }
-            Err(e) => {
-                println!("❌ Detection failed: {}", e);
-            }
-        }
+    // Create Arrow arrays
+    let group_id_array = StringArray::from(group_ids);
+    let name_array = StringArray::from(names);
+    let age_array = Int64Array::from(ages);
+    let job_array = StringArray::from(jobs);
+    let date_array = StringArray::from(dates);
+    
+    // Create schema
+    let schema = Schema::new(vec![
+        Field::new("group_id", DataType::Utf8, false),
+        Field::new("name", DataType::Utf8, false),
+        Field::new("age", DataType::Int64, false),
+        Field::new("job", DataType::Utf8, false),
+        Field::new("date", DataType::Utf8, false),
+    ]);
+    
+    // Create RecordBatch
+    let batch = RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(group_id_array),
+            Arc::new(name_array),
+            Arc::new(age_array),
+            Arc::new(job_array),
+            Arc::new(date_array),
+        ]
+    ).expect("Failed to create RecordBatch");
+    
+    println!("Created test data with {} rows", batch.num_rows());
+    println!("Schema: {:?}", batch.schema());
+    
+    // Test 1: Detect duplicates ignoring the group_id column
+    println!("=== Test 1: Ignoring group_id column ===");
+    let config = DuplicateDetectionConfig {
+        group_column: "group_id".to_string(),
+        ignore_columns: {
+            let mut set = HashSet::new();
+            set.insert("group_id".to_string()); // Ignore the group_id column itself
+            set
+        },
+        null_equals_null: true,
+    };
+    
+    let detector = DuplicateDetector::new(config);
+    let result = detector.detect_duplicates(&batch).expect("Detection failed");
+    
+    println!("Total duplicate groups: {}", result.total_duplicates);
+    println!("Total duplicate rows: {}", result.total_duplicate_rows);
+    println!("Groups processed: {}", result.stats.groups_processed);
+    println!("Groups analyzed: {}", result.stats.groups_analyzed);
+    println!("Unique groups found: {}", result.stats.unique_groups);
+    
+    for (i, group) in result.duplicate_groups.iter().enumerate() {
+        println!("Duplicate group {}: ID={}, Size={}, Occurrences={}", 
+                i + 1, group.group_id, group.group_size, group.row_indices.len());
     }
-
-    Ok(())
+    
+    // Test 2: Detect duplicates without ignoring any columns
+    println!("\n=== Test 2: Not ignoring any columns ===");
+    let config2 = DuplicateDetectionConfig {
+        group_column: "group_id".to_string(),
+        ignore_columns: HashSet::new(),
+        null_equals_null: true,
+    };
+    
+    let detector2 = DuplicateDetector::new(config2);
+    let result2 = detector2.detect_duplicates(&batch).expect("Detection failed");
+    
+    println!("Total duplicate groups: {}", result2.total_duplicates);
+    println!("Total duplicate rows: {}", result2.total_duplicate_rows);
+    println!("Groups processed: {}", result2.stats.groups_processed);
+    println!("Groups analyzed: {}", result2.stats.groups_analyzed);
+    println!("Unique groups found: {}", result2.stats.unique_groups);
+    
+    for (i, group) in result2.duplicate_groups.iter().enumerate() {
+        println!("Duplicate group {}: ID={}, Size={}, Occurrences={}", 
+                i + 1, group.group_id, group.group_size, group.row_indices.len());
+    }
+    
+    // Test 3: Create clean Arrow file
+    if result.total_duplicates > 0 {
+        println!("\n=== Test 3: Creating clean Arrow file ===");
+        // Create the directory if it doesn't exist
+        let output_dir = std::path::Path::new("test_duplicates");
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir).expect("Failed to create test_duplicates directory");
+        }
+        let output_path = output_dir.join("clean_test_table.arrow");
+        let kept_rows = detector.create_clean_arrow_file(&batch, &result, &output_path)
+            .expect("Failed to create clean Arrow file");
+        println!("Created clean Arrow file with {} rows kept", kept_rows);
+    }
+    
+    println!("\nTest completed!");
 } 

@@ -74,7 +74,7 @@ impl DuplicateDetector {
         Self { config }
     }
 
-    /// Detect duplicate groups in a record batch using sequential comparison
+    /// Detect duplicate groups in a record batch using content-based comparison
     pub fn detect_duplicates(&self, batch: &RecordBatch) -> Result<DuplicateDetectionResult> {
         let mut duplicate_groups = Vec::new();
         let mut stats = DetectionStats {
@@ -92,14 +92,17 @@ impl DuplicateDetector {
                 format!("Group column '{}' not found", self.config.group_column)
             ))?;
 
-        // Get column indices to ignore
-        let ignore_indices: HashSet<usize> = batch.schema()
+        // Get column indices to ignore (including the group column itself)
+        let mut ignore_indices: HashSet<usize> = batch.schema()
             .fields()
             .iter()
             .enumerate()
             .filter(|(_, field)| self.config.ignore_columns.contains(field.name()))
             .map(|(idx, _)| idx)
             .collect();
+        
+        // Always ignore the group column itself for content comparison
+        ignore_indices.insert(group_col_idx);
 
         // Group rows by group_id
         let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
@@ -124,54 +127,45 @@ impl DuplicateDetector {
 
         let mut processed_groups = HashSet::new();
         let mut unique_group_hashes = HashSet::new();
+        let mut content_hash_to_groups: HashMap<u64, Vec<(String, Vec<usize>)>> = HashMap::new();
 
-        // Sequential comparison: compare each group to all previous groups
-        for i in 0..group_list.len() {
-            let (current_group_id, current_rows) = &group_list[i];
-            
-            if processed_groups.contains(current_group_id) {
-                continue; // This group was already marked as duplicate
-            }
+        // First pass: compute content hashes for all groups
+        for (group_id, rows) in &group_list {
+            let content_hash = self.compute_group_hash(batch, rows, &ignore_indices)?;
+            content_hash_to_groups.entry(content_hash).or_insert_with(Vec::new).push((group_id.clone(), rows.clone()));
+        }
 
-            // Compute hash for current group
-            let current_hash = self.compute_group_hash(batch, current_rows, &ignore_indices)?;
-            unique_group_hashes.insert(current_hash);
-            stats.groups_analyzed += 1;
-
-            let mut duplicate_occurrences = vec![current_rows.clone()];
-            let mut is_duplicate = false;
-
-            // Compare with all previous groups
-            for j in 0..i {
-                let (prev_group_id, prev_rows) = &group_list[j];
+        // Second pass: find groups with identical content
+        for (content_hash, groups_with_same_content) in content_hash_to_groups {
+            if groups_with_same_content.len() > 1 {
+                // We found duplicate groups!
+                stats.groups_analyzed += groups_with_same_content.len();
+                unique_group_hashes.insert(content_hash);
                 
-                if processed_groups.contains(prev_group_id) {
-                    continue; // Skip groups that were already marked as duplicate
-                }
-
-                // Compute hash for previous group
-                let prev_hash = self.compute_group_hash(batch, prev_rows, &ignore_indices)?;
+                // Create duplicate group entry
+                let first_group = &groups_with_same_content[0];
+                let group_size = first_group.1.len();
+                let total_duplicate_rows: usize = groups_with_same_content.iter().map(|(_, rows)| rows.len()).sum();
                 
-                // If hashes match, mark current group as duplicate
-                if current_hash == prev_hash {
-                    is_duplicate = true;
-                    duplicate_occurrences.push(prev_rows.clone());
-                    processed_groups.insert(prev_group_id.clone());
-                    processed_groups.insert(current_group_id.clone());
-                }
-            }
-
-            // If this group is a duplicate, add it to results
-            if is_duplicate {
-                let group_size = current_rows.len();
-                let total_duplicate_rows: usize = duplicate_occurrences.iter().map(|rows| rows.len()).sum();
+                let row_indices: Vec<Vec<usize>> = groups_with_same_content.iter()
+                    .map(|(_, rows)| rows.clone())
+                    .collect();
                 
                 duplicate_groups.push(DuplicateGroup {
-                    group_hash: current_hash,
-                    group_id: current_group_id.clone(),
-                    row_indices: duplicate_occurrences,
+                    group_hash: content_hash,
+                    group_id: first_group.0.clone(),
+                    row_indices,
                     group_size,
                 });
+                
+                // Mark all groups as processed
+                for (group_id, _) in &groups_with_same_content {
+                    processed_groups.insert(group_id.clone());
+                }
+            } else {
+                // Single group with this content hash
+                stats.groups_analyzed += 1;
+                unique_group_hashes.insert(content_hash);
             }
         }
 
