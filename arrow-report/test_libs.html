@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Loading Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Library Loading Test</h1>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        
+        function testLibrary(name, url, testFn) {
+            const div = document.createElement('div');
+            div.className = 'test';
+            
+            try {
+                const script = document.createElement('script');
+                script.src = url;
+                script.onload = () => {
+                    try {
+                        const result = testFn();
+                        div.className = 'test success';
+                        div.innerHTML = `✅ ${name}: ${result}`;
+                    } catch (error) {
+                        div.className = 'test error';
+                        div.innerHTML = `❌ ${name}: ${error.message}`;
+                    }
+                };
+                script.onerror = () => {
+                    div.className = 'test error';
+                    div.innerHTML = `❌ ${name}: Failed to load from ${url}`;
+                };
+                document.head.appendChild(script);
+            } catch (error) {
+                div.className = 'test error';
+                div.innerHTML = `❌ ${name}: ${error.message}`;
+            }
+            
+            results.appendChild(div);
+        }
+
+        // Test Apache Arrow
+        testLibrary('Apache Arrow (unpkg)', 'https://unpkg.com/apache-arrow@12.0.1/dist/Arrow.es2015.min.js', () => {
+            if (typeof Arrow === 'undefined') throw new Error('Arrow not defined');
+            return 'Loaded successfully';
+        });
+
+        // Test Arquero
+        testLibrary('Arquero', 'https://unpkg.com/arquero@5.3.0/dist/arquero.min.js', () => {
+            if (typeof aq === 'undefined') throw new Error('Arquero not defined');
+            return 'Loaded successfully';
+        });
+
+        // Test Observable Plot
+        testLibrary('Observable Plot', 'https://unpkg.com/@observablehq/plot@0.6.17/dist/plot.umd.min.js', () => {
+            if (typeof Plot === 'undefined') throw new Error('Plot not defined');
+            return 'Loaded successfully';
+        });
+
+        // Test D3
+        testLibrary('D3', 'https://unpkg.com/d3@7.8.5/dist/d3.min.js', () => {
+            if (typeof d3 === 'undefined') throw new Error('D3 not defined');
+            return 'Loaded successfully';
+        });
+    </script>
+</body>
+</html> 
