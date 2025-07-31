@@ -53,12 +53,19 @@ class ArrowLoader {
      */
     async parseArrowData(arrayBuffer) {
         try {
+            // Check if Arrow library is available
+            if (typeof Arrow === 'undefined') {
+                throw new Error('Apache Arrow library not loaded. Please check your internet connection.');
+            }
+
             // Use Apache Arrow JS to parse the data
-            const arrow = await import('https://unpkg.com/apache-arrow@14.0.2/Arrow.es2015.min.js');
-            const table = arrow.Table.from(new Uint8Array(arrayBuffer));
+            const table = Arrow.Table.from(new Uint8Array(arrayBuffer));
             return table;
         } catch (error) {
             console.error('Error parsing Arrow data:', error);
+            if (error.message.includes('Arrow library not loaded')) {
+                throw error;
+            }
             throw new Error('Failed to parse Arrow file. Please ensure it\'s a valid Arrow format.');
         }
     }
@@ -106,7 +113,8 @@ class ArrowLoader {
         }
 
         // Handle different Arrow data types
-        switch (arrowType.toString()) {
+        const typeStr = arrowType.toString();
+        switch (typeStr) {
             case 'Timestamp':
                 return this.convertTimestamp(value, arrowType);
             case 'Date32':
@@ -146,7 +154,8 @@ class ArrowLoader {
         
         // Convert to milliseconds for JavaScript Date
         let milliseconds;
-        switch (arrowType.unit) {
+        const unit = arrowType.unit || 'MILLISECOND';
+        switch (unit) {
             case 'SECOND':
                 milliseconds = value * 1000;
                 break;
@@ -189,7 +198,8 @@ class ArrowLoader {
         
         // Convert to seconds first
         let seconds;
-        switch (arrowType.unit) {
+        const unit = arrowType.unit || 'SECOND';
+        switch (unit) {
             case 'SECOND':
                 seconds = value;
                 break;

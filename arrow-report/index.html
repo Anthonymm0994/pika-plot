@@ -30,14 +30,14 @@
                 <section class="control-section">
                     <h3>📁 Load Arrow File</h3>
                     <div class="file-loader">
-                        <div class="drop-zone" id="dropZone">
+                        <div class="drop-zone" id="fileDropZone">
                             <div class="drop-zone-content">
                                 <svg class="upload-icon" viewBox="0 0 24 24" width="48" height="48">
                                     <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                                 </svg>
                                 <p>Drag & drop Arrow file here</p>
                                 <p>or</p>
-                                <button class="btn btn-primary" id="filePicker">Choose File</button>
+                                <button class="btn btn-primary" id="browseBtn">Choose File</button>
                             </div>
                         </div>
                         <input type="file" id="fileInput" accept=".arrow,.parquet" style="display: none;">
@@ -45,14 +45,6 @@
                     <div class="file-info" id="fileInfo" style="display: none;">
                         <h4>File Info</h4>
                         <div id="fileStats"></div>
-                    </div>
-                </section>
-
-                <!-- Filters -->
-                <section class="control-section" id="filterSection" style="display: none;">
-                    <h3>🔍 Filters</h3>
-                    <div class="filter-controls" id="filterControls">
-                        <!-- Dynamic filter controls will be inserted here -->
                     </div>
                 </section>
 
@@ -71,37 +63,38 @@
                         </select>
                     </div>
 
-                    <!-- X Axis -->
+                    <!-- X Field -->
                     <div class="control-group">
-                        <label for="xAxis">X Axis:</label>
-                        <select id="xAxis" class="form-control">
-                            <option value="">Select field...</option>
+                        <label for="xField">X Field:</label>
+                        <select id="xField" class="form-control">
+                            <option value="">Select X field</option>
                         </select>
                     </div>
 
-                    <!-- Y Axis -->
+                    <!-- Y Field -->
                     <div class="control-group">
-                        <label for="yAxis">Y Axis:</label>
-                        <select id="yAxis" class="form-control">
-                            <option value="">Select field...</option>
+                        <label for="yField">Y Field:</label>
+                        <select id="yField" class="form-control">
+                            <option value="">Select Y field</option>
                         </select>
                     </div>
 
-                    <!-- Facet -->
+                    <!-- Color Field -->
                     <div class="control-group">
-                        <label for="facetBy">Facet By:</label>
-                        <select id="facetBy" class="form-control">
-                            <option value="">No faceting</option>
+                        <label for="colorField">Color Field:</label>
+                        <select id="colorField" class="form-control">
+                            <option value="">Select color field</option>
                         </select>
                     </div>
 
-                    <!-- Plot Options -->
+                    <!-- Filters -->
                     <div class="control-group">
-                        <label for="bins">Bins (for histogram/heatmap):</label>
-                        <input type="number" id="bins" class="form-control" value="20" min="5" max="100">
+                        <label>Filters:</label>
+                        <div id="filterContainer">
+                            <!-- Dynamic filter controls will be inserted here -->
+                        </div>
+                        <button class="btn btn-secondary" id="addFilterBtn">Add Filter</button>
                     </div>
-
-                    <button class="btn btn-secondary" id="updatePlot">Update Plot</button>
                 </section>
 
                 <!-- Derived Fields -->
@@ -109,26 +102,38 @@
                     <h3>🧮 Derived Fields</h3>
                     <div class="derived-controls">
                         <div class="control-group">
-                            <label for="derivedType">Type:</label>
-                            <select id="derivedType" class="form-control">
+                            <label for="derivedFieldType">Type:</label>
+                            <select id="derivedFieldType" class="form-control">
                                 <option value="difference">Row Difference</option>
                                 <option value="binned">Binned</option>
+                                <option value="rolling_mean">Rolling Mean</option>
+                                <option value="cumulative">Cumulative Sum</option>
                             </select>
                         </div>
                         <div class="control-group">
-                            <label for="derivedSource">Source Field:</label>
-                            <select id="derivedSource" class="form-control">
+                            <label for="sourceField">Source Field:</label>
+                            <select id="sourceField" class="form-control">
                                 <option value="">Select field...</option>
                             </select>
                         </div>
                         <div class="control-group">
-                            <label for="derivedName">Field Name:</label>
-                            <input type="text" id="derivedName" class="form-control" placeholder="e.g., delta_value">
+                            <label for="outputField">Field Name:</label>
+                            <input type="text" id="outputField" class="form-control" placeholder="e.g., delta_value">
                         </div>
-                        <button class="btn btn-secondary" id="addDerived">Add Derived Field</button>
+                        <button class="btn btn-secondary" id="addDerivedFieldBtn">Add Derived Field</button>
                     </div>
                     <div class="derived-fields-list" id="derivedFieldsList">
                         <!-- Derived fields will be listed here -->
+                    </div>
+                </section>
+
+                <!-- Export Controls -->
+                <section class="control-section" id="exportSection" style="display: none;">
+                    <h3>💾 Export</h3>
+                    <div class="export-controls">
+                        <button class="btn btn-secondary" id="exportSvgBtn">Export as SVG</button>
+                        <button class="btn btn-secondary" id="exportPngBtn">Export as PNG</button>
+                        <button class="btn btn-secondary" id="resetBtn">Reset</button>
                     </div>
                 </section>
             </aside>
@@ -157,6 +162,9 @@
                 <!-- Dynamic stats will be shown here -->
             </div>
         </footer>
+
+        <!-- Message Container -->
+        <div id="messageContainer" class="message-container"></div>
     </div>
 
     <!-- Scripts -->

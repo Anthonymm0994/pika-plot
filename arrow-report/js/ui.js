@@ -13,6 +13,7 @@ class ArrowUI {
     init() {
         this.setupEventListeners();
         this.updateStatus('Ready to load Arrow files');
+        this.plot.init();
     }
 
     setupEventListeners() {
@@ -109,14 +110,34 @@ class ArrowUI {
         this.updateFieldSelectors(schema);
         this.updateFilterControls();
         this.updateDerivedFieldsList();
+        
+        // Show relevant sections
+        this.showSection('plotSection');
+        this.showSection('derivedSection');
+        this.showSection('exportSection');
 
         this.updateStatus(`Loaded ${fileInfo.size ? this.formatFileSize(fileInfo.size) : 'unknown size'} file with ${schema.numRows.toLocaleString()} rows and ${schema.numCols} columns`);
         this.showMessage('File loaded successfully!', 'success');
     }
 
+    showSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        if (section) {
+            section.style.display = 'block';
+        }
+    }
+
+    hideSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        if (section) {
+            section.style.display = 'none';
+        }
+    }
+
     updateFileInfo(fileInfo) {
         const fileInfoElement = document.getElementById('fileInfo');
         if (fileInfoElement) {
+            fileInfoElement.style.display = 'block';
             fileInfoElement.innerHTML = `
                 <h3>File Information</h3>
                 <p><strong>Name:</strong> ${fileInfo.name}</p>
@@ -130,11 +151,13 @@ class ArrowUI {
         const xFieldSelect = document.getElementById('xField');
         const yFieldSelect = document.getElementById('yField');
         const colorFieldSelect = document.getElementById('colorField');
+        const sourceFieldSelect = document.getElementById('sourceField');
 
         // Clear existing options
         xFieldSelect.innerHTML = '<option value="">Select X field</option>';
         yFieldSelect.innerHTML = '<option value="">Select Y field</option>';
         colorFieldSelect.innerHTML = '<option value="">Select color field</option>';
+        sourceFieldSelect.innerHTML = '<option value="">Select field...</option>';
 
         // Add field options with type information
         schema.fields.forEach(field => {
@@ -146,6 +169,7 @@ class ArrowUI {
             xFieldSelect.appendChild(option.cloneNode(true));
             yFieldSelect.appendChild(option.cloneNode(true));
             colorFieldSelect.appendChild(option.cloneNode(true));
+            sourceFieldSelect.appendChild(option.cloneNode(true));
         });
 
         // Auto-select appropriate fields based on type
@@ -384,10 +408,17 @@ class ArrowUI {
         
         // Reset UI
         document.getElementById('fileInfo').innerHTML = '';
+        document.getElementById('fileInfo').style.display = 'none';
         document.getElementById('filterContainer').innerHTML = '';
         document.getElementById('derivedFieldsList').innerHTML = '';
         this.updateFieldSelectors({ fields: [] });
         this.updateStatus('Ready to load Arrow files');
+        
+        // Hide sections
+        this.hideSection('plotSection');
+        this.hideSection('derivedSection');
+        this.hideSection('exportSection');
+        
         this.showMessage('Application reset', 'info');
     }
 }
@@ -395,4 +426,5 @@ class ArrowUI {
 // Initialize UI when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.arrowUI = new ArrowUI();
+    window.arrowUI.init();
 }); 
