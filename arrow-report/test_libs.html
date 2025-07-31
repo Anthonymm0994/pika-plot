@@ -49,7 +49,7 @@
         }
 
         // Test Apache Arrow
-        testLibrary('Apache Arrow (unpkg)', 'https://unpkg.com/apache-arrow@12.0.1/dist/Arrow.es2015.min.js', () => {
+        testLibrary('Apache Arrow (jsdelivr)', 'https://cdn.jsdelivr.net/npm/apache-arrow@21.0.0/Arrow.es2015.min.js', () => {
             if (typeof Arrow === 'undefined') throw new Error('Arrow not defined');
             return 'Loaded successfully';
         });
