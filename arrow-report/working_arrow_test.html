@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Working Arrow File Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background: white; }
+        .success { background: #d4edda; color: #155724; border-color: #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+        button { padding: 12px 20px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        input[type="file"] { padding: 10px; border: 2px dashed #ddd; border-radius: 4px; width: 100%; margin: 10px 0; }
+        #plot { width: 100%; height: 500px; border: 1px solid #ddd; margin: 10px 0; background: white; }
+        #console { white-space: pre-wrap; background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 4px; border: 1px solid #dee2e6; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .file-info { background: #e9ecef; padding: 10px; border-radius: 4px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Working Arrow File Test</h1>
+        <p>This page actually loads and parses Arrow files, then creates plots.</p>
+        
+        <div class="test-section">
+            <h2>Step 1: Load Arrow File</h2>
+            <input type="file" id="fileInput" accept=".arrow" />
+            <button onclick="loadAndParseFile()">Load & Parse Arrow File</button>
+            <div id="loadResults"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Step 2: Create Plot</h2>
+            <button onclick="createPlot()" id="plotBtn" disabled>Create Plot</button>
+            <div id="plotResults"></div>
+            <div id="plot"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Console Output</h2>
+            <div id="console"></div>
+        </div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@latest/dist/Arrow.es2015.min.js"></script>
+    <script src="https://unpkg.com/@observablehq/plot@latest/dist/plot.umd.min.js"></script>
+
+    <script>
+        let parsedData = null;
+        
+        // Console capture
+        const originalLog = console.log;
+        const originalError = console.error;
+        const consoleDiv = document.getElementById('console');
+        
+        function log(message) {
+            originalLog(message);
+            consoleDiv.textContent += new Date().toLocaleTimeString() + ': ' + message + '\n';
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+        
+        function error(message) {
+            originalError(message);
+            consoleDiv.textContent += new Date().toLocaleTimeString() + ': ERROR: ' + message + '\n';
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+        
+        console.log = log;
+        console.error = error;
+        
+        function loadAndParseFile() {
+            const fileInput = document.getElementById('fileInput');
+            const results = document.getElementById('loadResults');
+            
+            if (fileInput.files.length === 0) {
+                results.innerHTML = '<div class="error">Please select a file first</div>';
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            results.innerHTML = `<div class="info">Loading: ${file.name} (${file.size} bytes)</div>`;
+            log(`Loading file: ${file.name} (${file.size} bytes)`);
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                log(`File loaded, size: ${arrayBuffer.byteLength} bytes`);
+                
+                try {
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    log(`First 32 bytes: [${Array.from(uint8Array.slice(0, 32)).join(', ')}]`);
+                    
+                    // Check if Arrow library is loaded
+                    if (typeof Arrow === 'undefined') {
+                        throw new Error('Apache Arrow library not loaded');
+                    }
+                    
+                    log('Arrow library loaded successfully');
+                    log(`Arrow object: ${typeof Arrow}`);
+                    
+                    // Try to parse the Arrow file
+                    let table;
+                    let method = '';
+                    
+                    if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
+                        table = Arrow.Table.from(uint8Array);
+                        method = 'Arrow.Table.from';
+                        log('Parsed with Arrow.Table.from');
+                    } else if (typeof Arrow.tableFrom === 'function') {
+                        table = Arrow.tableFrom(uint8Array);
+                        method = 'Arrow.tableFrom';
+                        log('Parsed with Arrow.tableFrom');
+                    } else if (typeof Arrow.read === 'function') {
+                        table = Arrow.read(uint8Array);
+                        method = 'Arrow.read';
+                        log('Parsed with Arrow.read');
+                    } else {
+                        throw new Error('No compatible Arrow parsing method found');
+                    }
+                    
+                    // Convert to JavaScript objects for plotting
+                    parsedData = table.toArray();
+                    
+                    log(`Table parsed successfully using ${method}`);
+                    log(`Rows: ${table.numRows}, Columns: ${table.numCols}`);
+                    log(`Schema: ${table.schema.fields.map(f => `${f.name}(${f.type})`).join(', ')}`);
+                    log(`Converted to array: ${parsedData.length} rows`);
+                    log(`Sample data: ${JSON.stringify(parsedData.slice(0, 2))}`);
+                    
+                    results.innerHTML = `
+                        <div class="success">
+                            ✅ File parsed successfully using ${method}!<br>
+                            Rows: ${table.numRows}<br>
+                            Columns: ${table.numCols}<br>
+                            Schema: ${table.schema.fields.map(f => `${f.name}(${f.type})`).join(', ')}<br>
+                            Sample data: ${JSON.stringify(parsedData.slice(0, 2))}
+                        </div>
+                    `;
+                    
+                    // Enable plot button
+                    document.getElementById('plotBtn').disabled = false;
+                    
+                } catch (error) {
+                    error(`Parsing failed: ${error.message}`);
+                    results.innerHTML = `<div class="error">❌ Parsing failed: ${error.message}</div>`;
+                }
+            };
+            
+            reader.onerror = function() {
+                error('File reading failed');
+                results.innerHTML = '<div class="error">❌ File reading failed</div>';
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function createPlot() {
+            if (!parsedData || parsedData.length === 0) {
+                document.getElementById('plotResults').innerHTML = '<div class="error">No data to plot</div>';
+                return;
+            }
+            
+            const results = document.getElementById('plotResults');
+            const plotDiv = document.getElementById('plot');
+            
+            try {
+                log('Creating plot...');
+                
+                // Find numeric fields for plotting
+                const numericFields = Object.keys(parsedData[0]).filter(key => {
+                    const val = parsedData[0][key];
+                    return typeof val === 'number' && !isNaN(val);
+                });
+                
+                log(`Numeric fields found: ${numericFields.join(', ')}`);
+                
+                if (numericFields.length < 2) {
+                    results.innerHTML = '<div class="error">Need at least 2 numeric fields to create scatter plot</div>';
+                    log('Not enough numeric fields for scatter plot');
+                    return;
+                }
+                
+                const xField = numericFields[0];
+                const yField = numericFields[1];
+                
+                log(`Creating scatter plot: ${xField} vs ${yField}`);
+                
+                // Create scatter plot
+                const plot = Plot.plot({
+                    marks: [
+                        Plot.dot(parsedData, {
+                            x: xField,
+                            y: yField,
+                            title: d => `${xField}: ${d[xField]}, ${yField}: ${d[yField]}`
+                        })
+                    ],
+                    width: 800,
+                    height: 500,
+                    x: { label: xField },
+                    y: { label: yField },
+                    title: `Scatter Plot: ${xField} vs ${yField}`
+                });
+                
+                plotDiv.innerHTML = '';
+                plotDiv.appendChild(plot);
+                
+                results.innerHTML = `
+                    <div class="success">
+                        ✅ Plot created successfully!<br>
+                        Data points: ${parsedData.length}<br>
+                        X-axis: ${xField}<br>
+                        Y-axis: ${yField}
+                    </div>
+                `;
+                
+                log('Plot created successfully');
+                
+            } catch (error) {
+                error(`Plot creation failed: ${error.message}`);
+                results.innerHTML = `<div class="error">❌ Plot creation failed: ${error.message}</div>`;
+            }
+        }
+        
+        // Test libraries on load
+        window.addEventListener('load', function() {
+            log('Page loaded, testing libraries...');
+            
+            const libraries = {
+                'Apache Arrow': typeof Arrow !== 'undefined',
+                'Observable Plot': typeof Plot !== 'undefined'
+            };
+            
+            Object.entries(libraries).forEach(([name, loaded]) => {
+                log(`${name}: ${loaded ? '✅ Loaded' : '❌ Not loaded'}`);
+            });
+            
+            if (libraries['Apache Arrow'] && libraries['Observable Plot']) {
+                log('All libraries loaded successfully');
+            } else {
+                log('Some libraries failed to load');
+            }
+        });
+    </script>
+</body>
+</html> 
