@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arrow Data Explorer - Test Page</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Apache Arrow JS -->
+    <script src="https://unpkg.com/apache-arrow@14.0.2/Arrow.es2015.min.js"></script>
+    <!-- Arquero for data manipulation -->
+    <script src="https://unpkg.com/arquero@5.3.0/dist/arquero.min.js"></script>
+    <!-- Observable Plot for visualization -->
+    <script src="https://unpkg.com/@observablehq/plot@0.6"></script>
+    <!-- D3 for additional utilities -->
+    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>Arrow Data Explorer - Test Page</h1>
+            <p>Test functionality with sample data</p>
+        </header>
+
+        <!-- Test Controls -->
+        <div class="test-controls" style="background: #f8f9fa; padding: 1rem; border-bottom: 1px solid #dee2e6;">
+            <h3>🧪 Test Controls</h3>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="generateSampleData()">Generate Sample Arrow Data</button>
+                <button class="btn btn-secondary" onclick="runTests()">Run All Tests</button>
+                <button class="btn btn-secondary" onclick="testLargeDataset()">Test Large Dataset</button>
+                <button class="btn btn-secondary" onclick="testPerformance()">Performance Test</button>
+            </div>
+            <div id="testResults" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <!-- File Loader -->
+                <section class="control-section">
+                    <h3>📁 Load Arrow File</h3>
+                    <div class="file-loader">
+                        <div class="drop-zone" id="dropZone">
+                            <div class="drop-zone-content">
+                                <svg class="upload-icon" viewBox="0 0 24 24" width="48" height="48">
+                                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                                </svg>
+                                <p>Drag & drop Arrow file here</p>
+                                <p>or</p>
+                                <button class="btn btn-primary" id="filePicker">Choose File</button>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".arrow,.parquet" style="display: none;">
+                    </div>
+                    <div class="file-info" id="fileInfo" style="display: none;">
+                        <h4>File Info</h4>
+                        <div id="fileStats"></div>
+                    </div>
+                </section>
+
+                <!-- Filters -->
+                <section class="control-section" id="filterSection" style="display: none;">
+                    <h3>🔍 Filters</h3>
+                    <div class="filter-controls" id="filterControls">
+                        <!-- Dynamic filter controls will be inserted here -->
+                    </div>
+                </section>
+
+                <!-- Plot Configuration -->
+                <section class="control-section" id="plotSection" style="display: none;">
+                    <h3>📊 Plot Configuration</h3>
+                    
+                    <!-- Chart Type -->
+                    <div class="control-group">
+                        <label for="chartType">Chart Type:</label>
+                        <select id="chartType" class="form-control">
+                            <option value="histogram">Histogram</option>
+                            <option value="heatmap">Heatmap</option>
+                            <option value="line">Line Chart</option>
+                            <option value="scatter">Scatter Plot</option>
+                        </select>
+                    </div>
+
+                    <!-- X Axis -->
+                    <div class="control-group">
+                        <label for="xAxis">X Axis:</label>
+                        <select id="xAxis" class="form-control">
+                            <option value="">Select field...</option>
+                        </select>
+                    </div>
+
+                    <!-- Y Axis -->
+                    <div class="control-group">
+                        <label for="yAxis">Y Axis:</label>
+                        <select id="yAxis" class="form-control">
+                            <option value="">Select field...</option>
+                        </select>
+                    </div>
+
+                    <!-- Facet -->
+                    <div class="control-group">
+                        <label for="facetBy">Facet By:</label>
+                        <select id="facetBy" class="form-control">
+                            <option value="">No faceting</option>
+                        </select>
+                    </div>
+
+                    <!-- Plot Options -->
+                    <div class="control-group">
+                        <label for="bins">Bins (for histogram/heatmap):</label>
+                        <input type="number" id="bins" class="form-control" value="20" min="5" max="100">
+                    </div>
+
+                    <button class="btn btn-secondary" id="updatePlot">Update Plot</button>
+                </section>
+
+                <!-- Derived Fields -->
+                <section class="control-section" id="derivedSection" style="display: none;">
+                    <h3>🧮 Derived Fields</h3>
+                    <div class="derived-controls">
+                        <div class="control-group">
+                            <label for="derivedType">Type:</label>
+                            <select id="derivedType" class="form-control">
+                                <option value="difference">Row Difference</option>
+                                <option value="binned">Binned</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="derivedSource">Source Field:</label>
+                            <select id="derivedSource" class="form-control">
+                                <option value="">Select field...</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="derivedName">Field Name:</label>
+                            <input type="text" id="derivedName" class="form-control" placeholder="e.g., delta_value">
+                        </div>
+                        <button class="btn btn-secondary" id="addDerived">Add Derived Field</button>
+                    </div>
+                    <div class="derived-fields-list" id="derivedFieldsList">
+                        <!-- Derived fields will be listed here -->
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Main Plot Area -->
+            <main class="plot-area">
+                <div class="plot-container" id="plotContainer">
+                    <div class="plot-placeholder">
+                        <svg class="placeholder-icon" viewBox="0 0 24 24" width="120" height="120">
+                            <path d="M3 3v18h18V3H3zm16 16H5V5h14v14z"/>
+                            <path d="M7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/>
+                        </svg>
+                        <h3>Load an Arrow file to start exploring</h3>
+                        <p>Drag and drop a .arrow file or use the file picker to begin</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-info" id="statusInfo">
+                Ready to load Arrow file
+            </div>
+            <div class="status-stats" id="statusStats">
+                <!-- Dynamic stats will be shown here -->
+            </div>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/loader.js"></script>
+    <script src="js/query.js"></script>
+    <script src="js/plot.js"></script>
+    <script src="js/ui.js"></script>
+    
+    <!-- Test Scripts -->
+    <script>
+        // Test functions
+        function generateSampleData() {
+            const testData = generateTestData(1000);
+            const arrowBuffer = createArrowBuffer(testData);
+            const file = new File([arrowBuffer], 'test_data.arrow', { type: 'application/octet-stream' });
+            
+            // Simulate file selection
+            arrowUI.handleFileSelect(file);
+            
+            document.getElementById('testResults').innerHTML = `
+                <div class="success">
+                    ✅ Generated sample Arrow data with ${testData.length} rows
+                </div>
+            `;
+        }
+
+        function generateTestData(rows) {
+            const data = [];
+            const categories = ['A', 'B', 'C', 'D', 'E'];
+            const departments = ['Engineering', 'Sales', 'Marketing', 'HR', 'Finance'];
+            
+            for (let i = 0; i < rows; i++) {
+                data.push({
+                    id: i + 1,
+                    name: `User ${i + 1}`,
+                    age: Math.floor(Math.random() * 50) + 20,
+                    salary: Math.floor(Math.random() * 100000) + 30000,
+                    category: categories[Math.floor(Math.random() * categories.length)],
+                    department: departments[Math.floor(Math.random() * departments.length)],
+                    is_active: Math.random() > 0.3,
+                    score: Math.random() * 100,
+                    timestamp: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString()
+                });
+            }
+            
+            return data;
+        }
+
+        function createArrowBuffer(data) {
+            // Convert data to Arrow format
+            const vectors = [];
+            const fields = [];
+            
+            // Get field names from first object
+            const fieldNames = Object.keys(data[0]);
+            
+            fieldNames.forEach(fieldName => {
+                const values = data.map(row => row[fieldName]);
+                const type = getArrowType(values[0]);
+                
+                fields.push(new arrow.Field(fieldName, type));
+                vectors.push(arrow.vectorFromArray(values, type));
+            });
+            
+            const schema = new arrow.Schema(fields);
+            const table = new arrow.Table(schema, vectors);
+            
+            return table.serialize();
+        }
+
+        function getArrowType(value) {
+            if (typeof value === 'string') {
+                return new arrow.Utf8();
+            } else if (typeof value === 'number') {
+                if (Number.isInteger(value)) {
+                    return new arrow.Int32();
+                } else {
+                    return new arrow.Float64();
+                }
+            } else if (typeof value === 'boolean') {
+                return new arrow.Bool();
+            } else {
+                return new arrow.Utf8();
+            }
+        }
+
+        function runTests() {
+            const results = [];
+            
+            // Test 1: Basic functionality
+            try {
+                const testData = generateTestData(100);
+                const arrowBuffer = createArrowBuffer(testData);
+                results.push('✅ Basic data generation: PASS');
+            } catch (error) {
+                results.push(`❌ Basic data generation: FAIL - ${error.message}`);
+            }
+            
+            // Test 2: Loader functionality
+            try {
+                const loader = new ArrowLoader();
+                results.push('✅ Loader initialization: PASS');
+            } catch (error) {
+                results.push(`❌ Loader initialization: FAIL - ${error.message}`);
+            }
+            
+            // Test 3: Query functionality
+            try {
+                const query = new ArrowQuery();
+                results.push('✅ Query initialization: PASS');
+            } catch (error) {
+                results.push(`❌ Query initialization: FAIL - ${error.message}`);
+            }
+            
+            // Test 4: Plot functionality
+            try {
+                const plot = new ArrowPlot();
+                results.push('✅ Plot initialization: PASS');
+            } catch (error) {
+                results.push(`❌ Plot initialization: FAIL - ${error.message}`);
+            }
+            
+            // Test 5: UI functionality
+            try {
+                if (window.arrowUI) {
+                    results.push('✅ UI initialization: PASS');
+                } else {
+                    results.push('❌ UI initialization: FAIL');
+                }
+            } catch (error) {
+                results.push(`❌ UI initialization: FAIL - ${error.message}`);
+            }
+            
+            document.getElementById('testResults').innerHTML = `
+                <div class="success">
+                    <h4>Test Results:</h4>
+                    ${results.map(result => `<div>${result}</div>`).join('')}
+                </div>
+            `;
+        }
+
+        function testLargeDataset() {
+            const startTime = performance.now();
+            const testData = generateTestData(10000);
+            const arrowBuffer = createArrowBuffer(testData);
+            const endTime = performance.now();
+            
+            const file = new File([arrowBuffer], 'large_test_data.arrow', { type: 'application/octet-stream' });
+            arrowUI.handleFileSelect(file);
+            
+            document.getElementById('testResults').innerHTML = `
+                <div class="success">
+                    ✅ Generated large dataset (10,000 rows) in ${(endTime - startTime).toFixed(2)}ms
+                </div>
+            `;
+        }
+
+        function testPerformance() {
+            const sizes = [100, 1000, 10000];
+            const results = [];
+            
+            sizes.forEach(size => {
+                const startTime = performance.now();
+                const testData = generateTestData(size);
+                const arrowBuffer = createArrowBuffer(testData);
+                const endTime = performance.now();
+                
+                results.push(`${size} rows: ${(endTime - startTime).toFixed(2)}ms`);
+            });
+            
+            document.getElementById('testResults').innerHTML = `
+                <div class="success">
+                    <h4>Performance Test Results:</h4>
+                    ${results.map(result => `<div>${result}</div>`).join('')}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html> 

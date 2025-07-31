@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arrow Data Explorer</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Apache Arrow JS -->
+    <script src="https://unpkg.com/apache-arrow@14.0.2/Arrow.es2015.min.js"></script>
+    <!-- Arquero for data manipulation -->
+    <script src="https://unpkg.com/arquero@5.3.0/dist/arquero.min.js"></script>
+    <!-- Observable Plot for visualization -->
+    <script src="https://unpkg.com/@observablehq/plot@0.6"></script>
+    <!-- D3 for additional utilities -->
+    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>Arrow Data Explorer</h1>
+            <p>Load, filter, and visualize Arrow files in your browser</p>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <!-- File Loader -->
+                <section class="control-section">
+                    <h3>📁 Load Arrow File</h3>
+                    <div class="file-loader">
+                        <div class="drop-zone" id="dropZone">
+                            <div class="drop-zone-content">
+                                <svg class="upload-icon" viewBox="0 0 24 24" width="48" height="48">
+                                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                                </svg>
+                                <p>Drag & drop Arrow file here</p>
+                                <p>or</p>
+                                <button class="btn btn-primary" id="filePicker">Choose File</button>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".arrow,.parquet" style="display: none;">
+                    </div>
+                    <div class="file-info" id="fileInfo" style="display: none;">
+                        <h4>File Info</h4>
+                        <div id="fileStats"></div>
+                    </div>
+                </section>
+
+                <!-- Filters -->
+                <section class="control-section" id="filterSection" style="display: none;">
+                    <h3>🔍 Filters</h3>
+                    <div class="filter-controls" id="filterControls">
+                        <!-- Dynamic filter controls will be inserted here -->
+                    </div>
+                </section>
+
+                <!-- Plot Configuration -->
+                <section class="control-section" id="plotSection" style="display: none;">
+                    <h3>📊 Plot Configuration</h3>
+                    
+                    <!-- Chart Type -->
+                    <div class="control-group">
+                        <label for="chartType">Chart Type:</label>
+                        <select id="chartType" class="form-control">
+                            <option value="histogram">Histogram</option>
+                            <option value="heatmap">Heatmap</option>
+                            <option value="line">Line Chart</option>
+                            <option value="scatter">Scatter Plot</option>
+                        </select>
+                    </div>
+
+                    <!-- X Axis -->
+                    <div class="control-group">
+                        <label for="xAxis">X Axis:</label>
+                        <select id="xAxis" class="form-control">
+                            <option value="">Select field...</option>
+                        </select>
+                    </div>
+
+                    <!-- Y Axis -->
+                    <div class="control-group">
+                        <label for="yAxis">Y Axis:</label>
+                        <select id="yAxis" class="form-control">
+                            <option value="">Select field...</option>
+                        </select>
+                    </div>
+
+                    <!-- Facet -->
+                    <div class="control-group">
+                        <label for="facetBy">Facet By:</label>
+                        <select id="facetBy" class="form-control">
+                            <option value="">No faceting</option>
+                        </select>
+                    </div>
+
+                    <!-- Plot Options -->
+                    <div class="control-group">
+                        <label for="bins">Bins (for histogram/heatmap):</label>
+                        <input type="number" id="bins" class="form-control" value="20" min="5" max="100">
+                    </div>
+
+                    <button class="btn btn-secondary" id="updatePlot">Update Plot</button>
+                </section>
+
+                <!-- Derived Fields -->
+                <section class="control-section" id="derivedSection" style="display: none;">
+                    <h3>🧮 Derived Fields</h3>
+                    <div class="derived-controls">
+                        <div class="control-group">
+                            <label for="derivedType">Type:</label>
+                            <select id="derivedType" class="form-control">
+                                <option value="difference">Row Difference</option>
+                                <option value="binned">Binned</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="derivedSource">Source Field:</label>
+                            <select id="derivedSource" class="form-control">
+                                <option value="">Select field...</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="derivedName">Field Name:</label>
+                            <input type="text" id="derivedName" class="form-control" placeholder="e.g., delta_value">
+                        </div>
+                        <button class="btn btn-secondary" id="addDerived">Add Derived Field</button>
+                    </div>
+                    <div class="derived-fields-list" id="derivedFieldsList">
+                        <!-- Derived fields will be listed here -->
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Main Plot Area -->
+            <main class="plot-area">
+                <div class="plot-container" id="plotContainer">
+                    <div class="plot-placeholder">
+                        <svg class="placeholder-icon" viewBox="0 0 24 24" width="120" height="120">
+                            <path d="M3 3v18h18V3H3zm16 16H5V5h14v14z"/>
+                            <path d="M7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/>
+                        </svg>
+                        <h3>Load an Arrow file to start exploring</h3>
+                        <p>Drag and drop a .arrow file or use the file picker to begin</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-info" id="statusInfo">
+                Ready to load Arrow file
+            </div>
+            <div class="status-stats" id="statusStats">
+                <!-- Dynamic stats will be shown here -->
+            </div>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/loader.js"></script>
+    <script src="js/query.js"></script>
+    <script src="js/plot.js"></script>
+    <script src="js/ui.js"></script>
+</body>
+</html> 
