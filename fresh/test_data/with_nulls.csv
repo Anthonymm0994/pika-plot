@@ -1,0 +1,5 @@
+group_id,name,age,salary,is_active,created_date,department,rating
+A,John,30,50000,true,2024-01-01,Engineering,4.5
+A,John,30,50000,true,2024-01-01,Engineering,4.5
+K,Unknown,,,false,,,3.5
+K,Unknown,,,false,,,3.5
