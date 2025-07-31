@@ -21,36 +21,57 @@ class ArrowUI {
         const dropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
 
+        console.log('Setting up event listeners for:', {
+            dropZone: dropZone ? 'found' : 'not found',
+            fileInput: fileInput ? 'found' : 'not found'
+        });
+
         // Drag and drop events
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropZone.classList.add('drag-over');
+            console.log('Drag over detected');
         });
 
-        dropZone.addEventListener('dragleave', () => {
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             dropZone.classList.remove('drag-over');
+            console.log('Drag leave detected');
         });
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropZone.classList.remove('drag-over');
             const files = e.dataTransfer.files;
+            console.log('Drop detected, files:', files.length);
             if (files.length > 0) {
+                console.log('Processing dropped file:', files[0].name);
                 this.handleFileSelect(files[0]);
             }
         });
 
         // File input change
         fileInput.addEventListener('change', (e) => {
+            console.log('File input change detected, files:', e.target.files.length);
             if (e.target.files.length > 0) {
+                console.log('Processing selected file:', e.target.files[0].name);
                 this.handleFileSelect(e.target.files[0]);
             }
         });
 
         // Browse button
-        document.getElementById('browseBtn').addEventListener('click', () => {
-            fileInput.click();
-        });
+        const browseBtn = document.getElementById('browseBtn');
+        if (browseBtn) {
+            browseBtn.addEventListener('click', () => {
+                console.log('Browse button clicked');
+                fileInput.click();
+            });
+        } else {
+            console.error('Browse button not found');
+        }
 
         // Chart type selector
         document.getElementById('chartType').addEventListener('change', (e) => {
@@ -83,12 +104,15 @@ class ArrowUI {
     }
 
     async handleFileSelect(file) {
+        console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
+        
         if (!this.loader.isValidArrowFile(file)) {
             this.showMessage('Please select a valid Arrow (.arrow) or Parquet (.parquet) file', 'error');
             return;
         }
 
         this.updateStatus('Loading file...');
+        this.showMessage(`Loading ${file.name} (${this.formatFileSize(file.size)})...`, 'info');
         
         try {
             const result = await this.loader.loadArrowFile(file);

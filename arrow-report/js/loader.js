@@ -55,18 +55,75 @@ class ArrowLoader {
         try {
             // Check if Arrow library is available
             if (typeof Arrow === 'undefined') {
-                throw new Error('Apache Arrow library not loaded. Please check your internet connection.');
+                // Try alternative global names
+                if (typeof window.Arrow !== 'undefined') {
+                    window.Arrow = window.Arrow;
+                } else if (typeof globalThis.Arrow !== 'undefined') {
+                    window.Arrow = globalThis.Arrow;
+                } else {
+                    throw new Error('Apache Arrow library not loaded. Please check your internet connection and ensure the script is loaded.');
+                }
             }
 
-            // Use Apache Arrow JS to parse the data
-            const table = Arrow.Table.from(new Uint8Array(arrayBuffer));
+            console.log('Arrow library loaded successfully');
+            console.log('ArrayBuffer size:', arrayBuffer.byteLength);
+            
+            // Convert ArrayBuffer to Uint8Array
+            const uint8Array = new Uint8Array(arrayBuffer);
+            console.log('Uint8Array length:', uint8Array.length);
+            console.log('First 32 bytes:', uint8Array.slice(0, 32));
+
+            // Try different parsing approaches
+            let table;
+            
+            try {
+                // Method 1: Direct parsing
+                table = Arrow.Table.from(uint8Array);
+                console.log('Successfully parsed with Arrow.Table.from()');
+            } catch (error1) {
+                console.log('Method 1 failed:', error1.message);
+                
+                try {
+                    // Method 2: Try with RecordBatchReader
+                    const reader = Arrow.RecordBatchReader.from(uint8Array);
+                    const batches = [];
+                    for await (const batch of reader) {
+                        batches.push(batch);
+                    }
+                    table = new Arrow.Table(batches);
+                    console.log('Successfully parsed with RecordBatchReader');
+                } catch (error2) {
+                    console.log('Method 2 failed:', error2.message);
+                    
+                    try {
+                        // Method 3: Try parsing as IPC format
+                        const ipcReader = Arrow.RecordBatchReader.from(uint8Array);
+                        const ipcBatches = [];
+                        for await (const batch of ipcReader) {
+                            ipcBatches.push(batch);
+                        }
+                        table = new Arrow.Table(ipcBatches);
+                        console.log('Successfully parsed as IPC format');
+                    } catch (error3) {
+                        console.log('Method 3 failed:', error3.message);
+                        throw new Error(`Failed to parse Arrow file. All parsing methods failed. Last error: ${error3.message}`);
+                    }
+                }
+            }
+
+            console.log('Parsed table info:', {
+                numRows: table.numRows,
+                numCols: table.numCols,
+                schema: table.schema.fields.map(f => ({ name: f.name, type: f.type.toString() }))
+            });
+
             return table;
         } catch (error) {
             console.error('Error parsing Arrow data:', error);
             if (error.message.includes('Arrow library not loaded')) {
                 throw error;
             }
-            throw new Error('Failed to parse Arrow file. Please ensure it\'s a valid Arrow format.');
+            throw new Error(`Failed to parse Arrow file. Please ensure it's a valid Arrow format. Error: ${error.message}`);
         }
     }
 
