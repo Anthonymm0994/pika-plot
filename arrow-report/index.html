@@ -4,22 +4,407 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arrow Data Explorer</title>
-    <link rel="stylesheet" href="css/style.css">
-    <!-- Apache Arrow JS -->
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@21.0.0/Arrow.es2015.min.js"></script>
-    <!-- Arquero for data manipulation -->
-    <script src="https://unpkg.com/arquero@5.3.0/dist/arquero.min.js"></script>
-    <!-- Observable Plot for visualization -->
-    <script src="https://unpkg.com/@observablehq/plot@0.6.17/dist/plot.umd.min.js"></script>
-    <!-- D3 for additional utilities -->
-    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
+    <style>
+        /* Reset and Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+
+        /* App Container */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .app-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .app-header h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .app-header p {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 350px;
+            background: white;
+            border-right: 1px solid #e9ecef;
+            overflow-y: auto;
+            padding: 1.5rem;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+        }
+
+        .control-section {
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .control-section:last-child {
+            border-bottom: none;
+        }
+
+        .control-section h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+
+        /* File Loader */
+        .file-loader {
+            margin-bottom: 1rem;
+        }
+
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            background-color: #fafafa;
+            cursor: pointer;
+        }
+
+        .drop-zone.drag-over {
+            border-color: #007bff;
+            background-color: #e3f2fd;
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(0, 123, 255, 0.15);
+        }
+
+        .drop-zone-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .upload-icon {
+            fill: #666;
+            transition: fill 0.3s ease;
+        }
+
+        .drop-zone.drag-over .upload-icon {
+            fill: #007bff;
+        }
+
+        .drop-zone p {
+            margin: 0;
+            color: #6c757d;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #545b62;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+        }
+
+        /* Form Controls */
+        .control-group {
+            margin-bottom: 1rem;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+
+        /* File Info */
+        .file-info {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .file-info h4 {
+            margin-bottom: 0.5rem;
+            color: #495057;
+        }
+
+        /* Plot Area */
+        .plot-area {
+            flex: 1;
+            background: white;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .plot-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .plot-container svg {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .plot-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #6c757d;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .placeholder-icon {
+            fill: #dee2e6;
+            margin-bottom: 16px;
+        }
+
+        .plot-placeholder h3 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .plot-placeholder p {
+            margin: 0;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .status-info {
+            font-weight: 500;
+        }
+
+        .status-stats {
+            display: flex;
+            gap: 16px;
+        }
+
+        /* Message Container */
+        .message-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+
+        .message {
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .message.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Error States */
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        /* Success States */
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        /* Loading States */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            
+            .app-header {
+                padding: 1rem;
+            }
+            
+            .app-header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .status-bar {
+                padding: 0.5rem 1rem;
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+
+            .plot-area {
+                width: 100%;
+                height: 400px;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
-            <h1>Arrow Data Explorer</h1>
-            <p>Load, filter, and visualize Arrow files in your browser</p>
+            <h1>🚀 Arrow Data Explorer</h1>
+            <p>Load, analyze, and visualize Arrow files in your browser</p>
         </header>
 
         <!-- Main Content -->
@@ -40,7 +425,7 @@
                                 <button class="btn btn-primary" id="browseBtn">Choose File</button>
                             </div>
                         </div>
-                        <input type="file" id="fileInput" accept=".arrow,.parquet" style="display: none;">
+                        <input type="file" id="fileInput" accept=".arrow" style="display: none;">
                     </div>
                     <div class="file-info" id="fileInfo" style="display: none;">
                         <h4>File Info</h4>
@@ -56,10 +441,10 @@
                     <div class="control-group">
                         <label for="chartType">Chart Type:</label>
                         <select id="chartType" class="form-control">
+                            <option value="scatter">Scatter Plot</option>
+                            <option value="line">Line Chart</option>
                             <option value="histogram">Histogram</option>
                             <option value="heatmap">Heatmap</option>
-                            <option value="line">Line Chart</option>
-                            <option value="scatter">Scatter Plot</option>
                         </select>
                     </div>
 
@@ -87,44 +472,7 @@
                         </select>
                     </div>
 
-                    <!-- Filters -->
-                    <div class="control-group">
-                        <label>Filters:</label>
-                        <div id="filterContainer">
-                            <!-- Dynamic filter controls will be inserted here -->
-                        </div>
-                        <button class="btn btn-secondary" id="addFilterBtn">Add Filter</button>
-                    </div>
-                </section>
-
-                <!-- Derived Fields -->
-                <section class="control-section" id="derivedSection" style="display: none;">
-                    <h3>🧮 Derived Fields</h3>
-                    <div class="derived-controls">
-                        <div class="control-group">
-                            <label for="derivedFieldType">Type:</label>
-                            <select id="derivedFieldType" class="form-control">
-                                <option value="difference">Row Difference</option>
-                                <option value="binned">Binned</option>
-                                <option value="rolling_mean">Rolling Mean</option>
-                                <option value="cumulative">Cumulative Sum</option>
-                            </select>
-                        </div>
-                        <div class="control-group">
-                            <label for="sourceField">Source Field:</label>
-                            <select id="sourceField" class="form-control">
-                                <option value="">Select field...</option>
-                            </select>
-                        </div>
-                        <div class="control-group">
-                            <label for="outputField">Field Name:</label>
-                            <input type="text" id="outputField" class="form-control" placeholder="e.g., delta_value">
-                        </div>
-                        <button class="btn btn-secondary" id="addDerivedFieldBtn">Add Derived Field</button>
-                    </div>
-                    <div class="derived-fields-list" id="derivedFieldsList">
-                        <!-- Derived fields will be listed here -->
-                    </div>
+                    <button class="btn btn-primary" id="createPlotBtn" style="width: 100%; margin-top: 1rem;">Create Plot</button>
                 </section>
 
                 <!-- Export Controls -->
@@ -167,10 +515,554 @@
         <div id="messageContainer" class="message-container"></div>
     </div>
 
-    <!-- Scripts -->
-    <script src="js/loader.js"></script>
-    <script src="js/query.js"></script>
-    <script src="js/plot.js"></script>
-    <script src="js/ui.js"></script>
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@21.0.0/Arrow.es2015.min.js"></script>
+    <script src="https://unpkg.com/@observablehq/plot@0.6.17/dist/plot.umd.min.js"></script>
+
+    <script>
+        // Arrow Data Explorer Application
+        class ArrowDataExplorer {
+            constructor() {
+                this.currentData = null;
+                this.schema = null;
+                this.fileInfo = null;
+                this.currentPlot = null;
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.updateStatus('Ready to load Arrow files');
+            }
+
+            setupEventListeners() {
+                // File drop zone
+                const dropZone = document.getElementById('fileDropZone');
+                const fileInput = document.getElementById('fileInput');
+                const browseBtn = document.getElementById('browseBtn');
+
+                // Drag and drop events
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('drag-over');
+                });
+
+                dropZone.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('drag-over');
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('drag-over');
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        this.handleFileSelect(files[0]);
+                    }
+                });
+
+                // File input change
+                fileInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        this.handleFileSelect(e.target.files[0]);
+                    }
+                });
+
+                // Browse button
+                browseBtn.addEventListener('click', () => {
+                    fileInput.click();
+                });
+
+                // Chart type selector
+                document.getElementById('chartType').addEventListener('change', () => {
+                    this.updatePlot();
+                });
+
+                // Field selectors
+                document.getElementById('xField').addEventListener('change', () => {
+                    this.updatePlot();
+                });
+
+                document.getElementById('yField').addEventListener('change', () => {
+                    this.updatePlot();
+                });
+
+                document.getElementById('colorField').addEventListener('change', () => {
+                    this.updatePlot();
+                });
+
+                // Create plot button
+                document.getElementById('createPlotBtn').addEventListener('click', () => {
+                    this.updatePlot();
+                });
+
+                // Export buttons
+                document.getElementById('exportSvgBtn').addEventListener('click', () => {
+                    this.exportPlot('svg');
+                });
+
+                document.getElementById('exportPngBtn').addEventListener('click', () => {
+                    this.exportPlot('png');
+                });
+
+                // Reset button
+                document.getElementById('resetBtn').addEventListener('click', () => {
+                    this.reset();
+                });
+            }
+
+            async handleFileSelect(file) {
+                console.log('File selected:', file.name, 'Size:', file.size);
+                
+                if (!file.name.endsWith('.arrow')) {
+                    this.showMessage('Please select a valid Arrow (.arrow) file', 'error');
+                    return;
+                }
+
+                this.updateStatus('Loading file...');
+                this.showMessage(`Loading ${file.name} (${this.formatFileSize(file.size)})...`, 'info');
+                
+                try {
+                    const result = await this.loadArrowFile(file);
+                    this.onDataLoaded(result.data, result.schema, result.fileInfo);
+                } catch (error) {
+                    console.error('Error loading file:', error);
+                    this.showMessage(`Error loading file: ${error.message}`, 'error');
+                    this.updateStatus('Error loading file');
+                }
+            }
+
+            async loadArrowFile(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        try {
+                            const arrayBuffer = e.target.result;
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            
+                            // Check if Arrow library is loaded
+                            if (typeof Arrow === 'undefined') {
+                                throw new Error('Apache Arrow library not loaded');
+                            }
+
+                            // Parse Arrow file using tableFromIPC
+                            let table;
+                            if (typeof Arrow.tableFromIPC === 'function') {
+                                table = Arrow.tableFromIPC(uint8Array);
+                            } else if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
+                                table = Arrow.Table.from(uint8Array);
+                            } else if (typeof Arrow.tableFrom === 'function') {
+                                table = Arrow.tableFrom(uint8Array);
+                            } else if (typeof Arrow.read === 'function') {
+                                table = Arrow.read(uint8Array);
+                            } else {
+                                throw new Error('No compatible Arrow parsing method found');
+                            }
+
+                            // Convert to JavaScript objects
+                            const data = table.toArray();
+                            const schema = {
+                                fields: table.schema.fields.map(f => ({
+                                    name: f.name,
+                                    type: f.type.toString()
+                                })),
+                                numRows: table.numRows,
+                                numCols: table.numCols
+                            };
+
+                            resolve({
+                                data,
+                                schema,
+                                fileInfo: {
+                                    name: file.name,
+                                    size: file.size,
+                                    lastModified: file.lastModified
+                                }
+                            });
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    reader.onerror = () => reject(new Error('File reading failed'));
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+
+            onDataLoaded(data, schema, fileInfo) {
+                this.currentData = data;
+                this.schema = schema;
+                this.fileInfo = fileInfo;
+
+                this.updateFileInfo(fileInfo);
+                this.updateFieldSelectors(schema);
+                
+                // Show relevant sections
+                this.showSection('plotSection');
+                this.showSection('exportSection');
+
+                this.updateStatus(`Loaded ${this.formatFileSize(fileInfo.size)} file with ${schema.numRows.toLocaleString()} rows and ${schema.numCols} columns`);
+                this.showMessage('File loaded successfully!', 'success');
+            }
+
+            showSection(sectionId) {
+                const section = document.getElementById(sectionId);
+                if (section) {
+                    section.style.display = 'block';
+                }
+            }
+
+            updateFileInfo(fileInfo) {
+                const fileInfoElement = document.getElementById('fileInfo');
+                if (fileInfoElement) {
+                    fileInfoElement.style.display = 'block';
+                    fileInfoElement.innerHTML = `
+                        <h4>File Information</h4>
+                        <p><strong>Name:</strong> ${fileInfo.name}</p>
+                        <p><strong>Size:</strong> ${this.formatFileSize(fileInfo.size)}</p>
+                        <p><strong>Modified:</strong> ${new Date(fileInfo.lastModified).toLocaleString()}</p>
+                    `;
+                }
+            }
+
+            updateFieldSelectors(schema) {
+                const xFieldSelect = document.getElementById('xField');
+                const yFieldSelect = document.getElementById('yField');
+                const colorFieldSelect = document.getElementById('colorField');
+
+                // Clear existing options
+                xFieldSelect.innerHTML = '<option value="">Select X field</option>';
+                yFieldSelect.innerHTML = '<option value="">Select Y field</option>';
+                colorFieldSelect.innerHTML = '<option value="">Select color field</option>';
+
+                // Add field options with type information
+                schema.fields.forEach(field => {
+                    const option = document.createElement('option');
+                    option.value = field.name;
+                    option.textContent = `${field.name} (${field.type})`;
+                    
+                    xFieldSelect.appendChild(option.cloneNode(true));
+                    yFieldSelect.appendChild(option.cloneNode(true));
+                    colorFieldSelect.appendChild(option.cloneNode(true));
+                });
+
+                // Auto-select appropriate fields
+                this.autoSelectFields(schema);
+            }
+
+            autoSelectFields(schema) {
+                const numericFields = schema.fields.filter(f => 
+                    f.type.includes('Int') || f.type.includes('Uint') || f.type.includes('Float')
+                );
+                const dateFields = schema.fields.filter(f => 
+                    f.type.includes('Date') || f.type.includes('Timestamp')
+                );
+                const categoricalFields = schema.fields.filter(f => 
+                    f.type.includes('Utf8') || f.type.includes('String')
+                );
+
+                // Auto-select X field (prefer date/time, then numeric)
+                if (dateFields.length > 0) {
+                    document.getElementById('xField').value = dateFields[0].name;
+                } else if (numericFields.length > 0) {
+                    document.getElementById('xField').value = numericFields[0].name;
+                }
+
+                // Auto-select Y field (prefer numeric)
+                if (numericFields.length > 0) {
+                    const yField = numericFields.find(f => f.name !== document.getElementById('xField').value) || numericFields[0];
+                    document.getElementById('yField').value = yField.name;
+                }
+
+                // Auto-select color field (prefer categorical)
+                if (categoricalFields.length > 0) {
+                    document.getElementById('colorField').value = categoricalFields[0].name;
+                }
+            }
+
+            updatePlot() {
+                if (!this.currentData || this.currentData.length === 0) {
+                    this.showEmptyState();
+                    return;
+                }
+
+                try {
+                    const xField = document.getElementById('xField').value;
+                    const yField = document.getElementById('yField').value;
+                    const colorField = document.getElementById('colorField').value;
+                    const chartType = document.getElementById('chartType').value;
+
+                    if (!xField || !yField) {
+                        this.showEmptyState('Please select X and Y fields');
+                        return;
+                    }
+
+                    // Create plot based on chart type
+                    const plotElement = this.createPlot(chartType, xField, yField, colorField);
+                    
+                    if (plotElement) {
+                        const plotContainer = document.getElementById('plotContainer');
+                        plotContainer.innerHTML = '';
+                        plotContainer.appendChild(plotElement);
+                        this.currentPlot = plotElement;
+                        this.showMessage('Plot created successfully!', 'success');
+                    } else {
+                        this.showEmptyState('Unable to create plot with selected fields');
+                    }
+
+                } catch (error) {
+                    console.error('Error updating plot:', error);
+                    this.showMessage(`Error creating plot: ${error.message}`, 'error');
+                }
+            }
+
+            createPlot(chartType, xField, yField, colorField) {
+                try {
+                    const plotData = this.currentData;
+                    
+                    switch (chartType) {
+                        case 'scatter':
+                            return this.createScatterPlot(plotData, xField, yField, colorField);
+                        case 'line':
+                            return this.createLineChart(plotData, xField, yField, colorField);
+                        case 'histogram':
+                            return this.createHistogram(plotData, xField);
+                        case 'heatmap':
+                            return this.createHeatmap(plotData, xField, yField);
+                        default:
+                            return this.createScatterPlot(plotData, xField, yField, colorField);
+                    }
+                } catch (error) {
+                    console.error('Error creating plot:', error);
+                    return null;
+                }
+            }
+
+            createScatterPlot(data, xField, yField, colorField) {
+                const plot = Plot.plot({
+                    width: 800,
+                    height: 500,
+                    margin: 40,
+                    x: {
+                        grid: true,
+                        label: xField
+                    },
+                    y: {
+                        grid: true,
+                        label: yField
+                    },
+                    color: colorField ? {
+                        legend: true,
+                        label: colorField
+                    } : undefined,
+                    marks: [
+                        Plot.dot(data, { 
+                            x: xField, 
+                            y: yField,
+                            fill: colorField || 'steelblue',
+                            opacity: 0.6
+                        })
+                    ],
+                    title: `Scatter Plot: ${yField} vs ${xField}`
+                });
+
+                return plot;
+            }
+
+            createLineChart(data, xField, yField, colorField) {
+                const plot = Plot.plot({
+                    width: 800,
+                    height: 500,
+                    margin: 40,
+                    x: {
+                        grid: true,
+                        label: xField
+                    },
+                    y: {
+                        grid: true,
+                        label: yField
+                    },
+                    color: colorField ? {
+                        legend: true,
+                        label: colorField
+                    } : undefined,
+                    marks: [
+                        Plot.line(data, { 
+                            x: xField, 
+                            y: yField,
+                            stroke: colorField || 'steelblue'
+                        }),
+                        Plot.dot(data, { 
+                            x: xField, 
+                            y: yField,
+                            fill: colorField || 'steelblue'
+                        })
+                    ],
+                    title: `Line Chart: ${yField} vs ${xField}`
+                });
+
+                return plot;
+            }
+
+            createHistogram(data, xField) {
+                const plot = Plot.plot({
+                    width: 800,
+                    height: 500,
+                    margin: 40,
+                    x: {
+                        grid: true,
+                        label: xField
+                    },
+                    y: {
+                        grid: true,
+                        label: 'Count'
+                    },
+                    marks: [
+                        Plot.rectY(data, Plot.binX({ y: 'count' }, { x: xField, thresholds: 20 })),
+                        Plot.ruleY([0])
+                    ],
+                    title: `Histogram of ${xField}`
+                });
+
+                return plot;
+            }
+
+            createHeatmap(data, xField, yField) {
+                const plot = Plot.plot({
+                    width: 800,
+                    height: 500,
+                    margin: 40,
+                    x: {
+                        grid: true,
+                        label: xField
+                    },
+                    y: {
+                        grid: true,
+                        label: yField
+                    },
+                    color: {
+                        legend: true,
+                        label: 'Count'
+                    },
+                    marks: [
+                        Plot.rect(data, Plot.bin({ fill: 'count' }, { 
+                            x: xField, 
+                            y: yField,
+                            thresholds: 20 
+                        }))
+                    ],
+                    title: `Heatmap: ${xField} vs ${yField}`
+                });
+
+                return plot;
+            }
+
+            showEmptyState(message = 'No data to plot') {
+                const plotContainer = document.getElementById('plotContainer');
+                plotContainer.innerHTML = `
+                    <div class="plot-placeholder">
+                        <svg class="placeholder-icon" viewBox="0 0 24 24" width="120" height="120">
+                            <path d="M3 3v18h18V3H3zm16 16H5V5h14v14z"/>
+                            <path d="M7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/>
+                        </svg>
+                        <h3>${message}</h3>
+                        <p>Select fields and configure your plot to visualize the data</p>
+                    </div>
+                `;
+            }
+
+            exportPlot(format) {
+                if (!this.currentPlot) {
+                    this.showMessage('No plot to export', 'error');
+                    return;
+                }
+
+                try {
+                    if (format === 'svg') {
+                        const svg = this.currentPlot.querySelector('svg');
+                        if (svg) {
+                            const serializer = new XMLSerializer();
+                            const svgString = serializer.serializeToString(svg);
+                            const blob = new Blob([svgString], { type: 'image/svg+xml' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = 'arrow-plot.svg';
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        }
+                    } else if (format === 'png') {
+                        // PNG export would require canvas conversion
+                        this.showMessage('PNG export not implemented yet', 'info');
+                    }
+                    this.showMessage(`Plot exported as ${format.toUpperCase()}`, 'success');
+                } catch (error) {
+                    this.showMessage(`Error exporting plot: ${error.message}`, 'error');
+                }
+            }
+
+            reset() {
+                this.currentData = null;
+                this.schema = null;
+                this.fileInfo = null;
+                this.currentPlot = null;
+                
+                // Reset UI
+                document.getElementById('fileInfo').innerHTML = '';
+                document.getElementById('fileInfo').style.display = 'none';
+                this.updateFieldSelectors({ fields: [] });
+                this.updateStatus('Ready to load Arrow files');
+                
+                // Hide sections
+                document.getElementById('plotSection').style.display = 'none';
+                document.getElementById('exportSection').style.display = 'none';
+                
+                // Show empty state
+                this.showEmptyState();
+                
+                this.showMessage('Application reset', 'info');
+            }
+
+            updateStatus(message) {
+                const statusElement = document.getElementById('statusInfo');
+                if (statusElement) {
+                    statusElement.textContent = message;
+                }
+            }
+
+            showMessage(message, type = 'info') {
+                const messageContainer = document.getElementById('messageContainer');
+                if (!messageContainer) return;
+
+                const messageElement = document.createElement('div');
+                messageElement.className = `message ${type}`;
+                messageElement.textContent = message;
+                
+                messageContainer.appendChild(messageElement);
+                
+                // Auto-remove after 5 seconds
+                setTimeout(() => {
+                    if (messageElement.parentNode) {
+                        messageElement.parentNode.removeChild(messageElement);
+                    }
+                }, 5000);
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+        }
+
+        // Initialize application when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.arrowExplorer = new ArrowDataExplorer();
+        });
+    </script>
 </body>
 </html> 
