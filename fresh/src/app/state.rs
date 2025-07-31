@@ -1,6 +1,6 @@
 use egui::{Context, Id};
 use crate::core::{Database, TableInfo};
-use crate::ui::{Sidebar, SidebarAction, QueryWindow, CsvImportDialog, FileConfigDialog, HomeScreen, PlotWindow, DuplicateDetectionDialog, DuplicateResultsViewer};
+use crate::ui::{Sidebar, SidebarAction, QueryWindow, CsvImportDialog, FileConfigDialog, HomeScreen, PlotWindow, DuplicateDetectionDialog, DuplicateResultsViewer, TransformationDialog, TransformationManager};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,6 +29,8 @@ pub struct FreshApp<'a> {
     file_config_dialog: FileConfigDialog,
     duplicate_detection_dialog: DuplicateDetectionDialog,
     duplicate_results_viewer: DuplicateResultsViewer,
+    transformation_dialog: TransformationDialog,
+    transformation_manager: TransformationManager,
     next_window_id: usize,
     error: Option<String>,
 }
@@ -49,6 +51,8 @@ impl<'a> FreshApp<'a> {
             file_config_dialog: FileConfigDialog::new(),
             duplicate_detection_dialog: DuplicateDetectionDialog::default(),
             duplicate_results_viewer: DuplicateResultsViewer::default(),
+            transformation_dialog: TransformationDialog::new(),
+            transformation_manager: TransformationManager::new(),
             next_window_id: 0,
             error: None,
         }
@@ -102,6 +106,27 @@ impl<'a> FreshApp<'a> {
                         }
                         SidebarAction::RefreshDatabase => {
                             self.refresh_database();
+                        }
+                        SidebarAction::AddDerivedField => {
+                            self.transformation_dialog.visible = true;
+                            self.transformation_dialog.transformation_type = Some(crate::core::TransformationType::Delta);
+                            if let Some(db) = &self.database {
+                                self.transformation_dialog.update_available_tables(db);
+                            }
+                        }
+                        SidebarAction::AddTimeBinColumn => {
+                            self.transformation_dialog.visible = true;
+                            self.transformation_dialog.transformation_type = Some(crate::core::TransformationType::TimeBin);
+                            if let Some(db) = &self.database {
+                                self.transformation_dialog.update_available_tables(db);
+                            }
+                        }
+                        SidebarAction::AddRowIdColumns => {
+                            self.transformation_dialog.visible = true;
+                            self.transformation_dialog.transformation_type = Some(crate::core::TransformationType::RowId);
+                            if let Some(db) = &self.database {
+                                self.transformation_dialog.update_available_tables(db);
+                            }
                         }
                         SidebarAction::None => {}
                     }
@@ -197,6 +222,20 @@ impl<'a> FreshApp<'a> {
         // Show duplicate detection dialog if active
         if let Some(db) = &self.database {
             self.duplicate_detection_dialog.show(ctx, db);
+        }
+        
+        // Show transformation dialog if active
+        if let Some(db) = &self.database {
+            if let Some(request) = self.transformation_dialog.show(ctx, db) {
+                match self.transformation_manager.apply_transformation(&request, db) {
+                    Ok(output_path) => {
+                        self.error = Some(format!("Transformation completed successfully! Output saved to: {}", output_path));
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Transformation failed: {}", e));
+                    }
+                }
+            }
         }
         
         // File config dialog

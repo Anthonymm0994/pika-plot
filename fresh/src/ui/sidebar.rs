@@ -7,6 +7,9 @@ pub enum SidebarAction {
     OpenTable(String),
     OpenDuplicateDetection,
     RefreshDatabase,
+    AddDerivedField,
+    AddTimeBinColumn,
+    AddRowIdColumns,
 }
 
 pub struct Sidebar {
@@ -32,6 +35,8 @@ impl Sidebar {
         // Darker background for the sidebar
         ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_gray(25);
         
+        let mut duplicate_clicked = false;
+        
         ui.vertical(|ui| {
             ui.heading("Data Sources");
             ui.separator();
@@ -41,11 +46,19 @@ impl Sidebar {
             ui.separator();
             
             if ui.button("🔍 Detect Duplicate Blocks").clicked() {
-                self.duplicate_detection_clicked = true;
+                duplicate_clicked = true;
             }
             
-            if ui.button("🔄 Refresh Database").clicked() {
-                action = SidebarAction::RefreshDatabase;
+            if ui.button("➕ Add Derived Field").clicked() {
+                return SidebarAction::AddDerivedField;
+            }
+            
+            if ui.button("⏰ Add Time Bin Column").clicked() {
+                return SidebarAction::AddTimeBinColumn;
+            }
+            
+            if ui.button("🆔 Add Row ID Columns").clicked() {
+                return SidebarAction::AddRowIdColumns;
             }
             
             ui.add_space(10.0);
@@ -155,7 +168,7 @@ impl Sidebar {
         
         if action != SidebarAction::None {
             action
-        } else if self.duplicate_detection_clicked {
+        } else if duplicate_clicked {
             SidebarAction::OpenDuplicateDetection
         } else if let Some(table) = table_to_open {
             SidebarAction::OpenTable(table)
