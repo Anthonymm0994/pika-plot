@@ -69,6 +69,10 @@ path = "test_data/debug_time_import.rs"
 name = "test_csv_import_debug"
 path = "test_data/test_csv_import_debug.rs"
 
+[[bin]]
+name = "test_duplicate_detection"
+path = "test_duplicate_detection.rs"
+
 [profile.release]
 opt-level = 3
 lto = true 

@@ -1,11 +1,12 @@
 use egui;
 use crate::core::database::TableInfo;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SidebarAction {
     None,
     OpenTable(String),
     OpenDuplicateDetection,
+    RefreshDatabase,
 }
 
 pub struct Sidebar {
@@ -25,6 +26,7 @@ impl Sidebar {
     
     pub fn show(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, tables: &[TableInfo], views: &[String]) -> SidebarAction {
         let mut table_to_open = None;
+        let mut action = SidebarAction::None;
         self.duplicate_detection_clicked = false;
         
         // Darker background for the sidebar
@@ -40,6 +42,10 @@ impl Sidebar {
             
             if ui.button("🔍 Detect Duplicate Blocks").clicked() {
                 self.duplicate_detection_clicked = true;
+            }
+            
+            if ui.button("🔄 Refresh Database").clicked() {
+                action = SidebarAction::RefreshDatabase;
             }
             
             ui.add_space(10.0);
@@ -147,7 +153,9 @@ impl Sidebar {
                 });
         });
         
-        if self.duplicate_detection_clicked {
+        if action != SidebarAction::None {
+            action
+        } else if self.duplicate_detection_clicked {
             SidebarAction::OpenDuplicateDetection
         } else if let Some(table) = table_to_open {
             SidebarAction::OpenTable(table)

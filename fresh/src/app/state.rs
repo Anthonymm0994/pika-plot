@@ -100,6 +100,9 @@ impl<'a> FreshApp<'a> {
                                 self.duplicate_detection_dialog.update_available_tables_and_columns(db);
                             }
                         }
+                        SidebarAction::RefreshDatabase => {
+                            self.refresh_database();
+                        }
                         SidebarAction::None => {}
                     }
                 });
@@ -491,6 +494,32 @@ impl<'a> FreshApp<'a> {
                 },
                 Err(e) => self.error = Some(format!("Failed to load views: {}", e)),
             }
+        }
+    }
+
+    fn refresh_database(&mut self) {
+        if let Some(db_path) = &self.database_path {
+            if let Some(db) = &mut self.database {
+                // Clone the database for mutable operations
+                let mut db_clone = (**db).clone();
+                match db_clone.load_all_tables_from_directory(db_path) {
+                    Ok(loaded_tables) => {
+                        if !loaded_tables.is_empty() {
+                            // Update the stored database with the modified version
+                            self.database = Some(Arc::new(db_clone));
+                            self.load_tables();
+                            self.error = Some(format!("Refreshed database: loaded {} new tables", loaded_tables.len()));
+                        } else {
+                            self.error = Some("No new Arrow files found in database directory".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Failed to refresh database: {}", e));
+                    }
+                }
+            }
+        } else {
+            self.error = Some("No database path available for refresh".to_string());
         }
     }
 } 

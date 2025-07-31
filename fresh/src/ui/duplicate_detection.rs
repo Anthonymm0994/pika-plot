@@ -103,9 +103,6 @@ impl DuplicateDetectionDialog {
                 });
         });
 
-        // Null handling
-        ui.checkbox(&mut self.null_equals_null, "Treat null values as equal");
-
         ui.separator();
 
         // Column ignore selection
@@ -170,20 +167,7 @@ impl DuplicateDetectionDialog {
                 ui.separator();
                 ui.heading("Export Options");
                 
-                // Output directory selection
-                ui.horizontal(|ui| {
-                    ui.label("Output directory:");
-                    ui.label(&self.output_directory.display().to_string());
-                    if ui.button("📁 Browse").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_directory(&self.output_directory)
-                            .pick_folder() {
-                            self.output_directory = path;
-                        }
-                    }
-                });
-
-                ui.label("💾 Creates a new Arrow file with duplicates removed");
+                ui.label("💾 Click 'Export Clean Arrow File' to save with duplicates removed");
             }
         }
 
@@ -273,24 +257,31 @@ impl DuplicateDetectionDialog {
         // Load the table as Arrow batch using the non-mutable version
         match db.get_table_arrow_batch(&self.selected_table) {
             Ok(batch) => {
-                // Create clean Arrow file
-                match detector.create_clean_arrow_file_with_path(
-                    &batch,
-                    result,
-                    &self.output_directory,
-                    &self.selected_table,
-                ) {
-                    Ok((output_path, kept_rows)) => {
-                        self.success_message = Some(format!(
-                            "✅ Created clean Arrow file: {}\nKept {} rows, removed {} duplicate rows",
-                            output_path.display(),
-                            kept_rows,
-                            batch.num_rows() - kept_rows
-                        ));
-                        self.show_success = true;
-                    }
-                    Err(e) => {
-                        self.error_message = Some(format!("Failed to create clean Arrow file: {}", e));
+                // Open file dialog to select export location
+                if let Some(output_path) = rfd::FileDialog::new()
+                    .set_title("Save Clean Arrow File")
+                    .set_directory(&self.output_directory)
+                    .add_filter("Arrow Files", &["arrow"])
+                    .save_file() {
+                    
+                    // Create clean Arrow file
+                    match detector.create_clean_arrow_file(
+                        &batch,
+                        result,
+                        &output_path,
+                    ) {
+                        Ok(kept_rows) => {
+                            self.success_message = Some(format!(
+                                "✅ Created clean Arrow file: {}\nKept {} rows, removed {} duplicate rows",
+                                output_path.display(),
+                                kept_rows,
+                                batch.num_rows() - kept_rows
+                            ));
+                            self.show_success = true;
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to create clean Arrow file: {}", e));
+                        }
                     }
                 }
             }
