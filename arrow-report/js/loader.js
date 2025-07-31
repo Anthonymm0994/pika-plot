@@ -66,6 +66,7 @@ class ArrowLoader {
             }
 
             console.log('Arrow library loaded successfully');
+            console.log('Arrow object:', typeof Arrow, Arrow);
             console.log('ArrayBuffer size:', arrayBuffer.byteLength);
             
             // Convert ArrayBuffer to Uint8Array
@@ -77,33 +78,48 @@ class ArrowLoader {
             let table;
             
             try {
-                // Method 1: Direct parsing
-                table = Arrow.Table.from(uint8Array);
-                console.log('Successfully parsed with Arrow.Table.from()');
+                // Method 1: Try with Arrow.Table.from (newer API)
+                if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
+                    table = Arrow.Table.from(uint8Array);
+                    console.log('Successfully parsed with Arrow.Table.from()');
+                } else if (typeof Arrow.tableFrom !== 'undefined') {
+                    // Method 2: Try with Arrow.tableFrom (alternative API)
+                    table = Arrow.tableFrom(uint8Array);
+                    console.log('Successfully parsed with Arrow.tableFrom()');
+                } else if (typeof Arrow.read !== 'undefined') {
+                    // Method 3: Try with Arrow.read (older API)
+                    table = Arrow.read(uint8Array);
+                    console.log('Successfully parsed with Arrow.read()');
+                } else {
+                    throw new Error('No compatible Arrow parsing method found');
+                }
             } catch (error1) {
                 console.log('Method 1 failed:', error1.message);
                 
                 try {
-                    // Method 2: Try with RecordBatchReader
-                    const reader = Arrow.RecordBatchReader.from(uint8Array);
-                    const batches = [];
-                    for await (const batch of reader) {
-                        batches.push(batch);
+                    // Method 4: Try with RecordBatchReader
+                    if (typeof Arrow.RecordBatchReader !== 'undefined') {
+                        const reader = Arrow.RecordBatchReader.from(uint8Array);
+                        const batches = [];
+                        for await (const batch of reader) {
+                            batches.push(batch);
+                        }
+                        table = new Arrow.Table(batches);
+                        console.log('Successfully parsed with RecordBatchReader');
+                    } else {
+                        throw new Error('RecordBatchReader not available');
                     }
-                    table = new Arrow.Table(batches);
-                    console.log('Successfully parsed with RecordBatchReader');
                 } catch (error2) {
                     console.log('Method 2 failed:', error2.message);
                     
                     try {
-                        // Method 3: Try parsing as IPC format
-                        const ipcReader = Arrow.RecordBatchReader.from(uint8Array);
-                        const ipcBatches = [];
-                        for await (const batch of ipcReader) {
-                            ipcBatches.push(batch);
+                        // Method 5: Try parsing as IPC format with different API
+                        if (typeof Arrow.tableFromIPC !== 'undefined') {
+                            table = Arrow.tableFromIPC(uint8Array);
+                            console.log('Successfully parsed as IPC format');
+                        } else {
+                            throw new Error('IPC parsing not available');
                         }
-                        table = new Arrow.Table(ipcBatches);
-                        console.log('Successfully parsed as IPC format');
                     } catch (error3) {
                         console.log('Method 3 failed:', error3.message);
                         throw new Error(`Failed to parse Arrow file. All parsing methods failed. Last error: ${error3.message}`);

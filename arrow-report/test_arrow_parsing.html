@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arrow Debug Test</title>
+    <title>Arrow Parsing Test</title>
     <!-- Apache Arrow JS -->
     <script src="https://unpkg.com/apache-arrow@latest/dist/Arrow.es2015.min.js"></script>
     <!-- Arquero for data manipulation -->
@@ -19,12 +19,18 @@
     </style>
 </head>
 <body>
-    <h1>Arrow File Debug Test</h1>
+    <h1>Arrow Parsing Test</h1>
     
     <div class="test-section">
         <h2>Library Loading Test</h2>
         <button onclick="testLibraries()">Test Libraries</button>
         <div id="libraryOutput"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Arrow API Test</h2>
+        <button onclick="testArrowAPI()">Test Arrow API</button>
+        <div id="apiOutput"></div>
     </div>
     
     <div class="test-section">
@@ -74,6 +80,52 @@
             }
         }
 
+        function testArrowAPI() {
+            const output = document.getElementById('apiOutput');
+            output.innerHTML = '';
+            
+            try {
+                console.log('Testing Arrow API...');
+                console.log('Arrow object:', typeof Arrow, Arrow);
+                
+                // Test different Arrow API methods
+                const apiMethods = [
+                    'Arrow.Table',
+                    'Arrow.tableFrom',
+                    'Arrow.read',
+                    'Arrow.tableFromIPC',
+                    'Arrow.RecordBatchReader'
+                ];
+                
+                let availableMethods = [];
+                apiMethods.forEach(method => {
+                    try {
+                        const methodPath = method.split('.');
+                        let obj = Arrow;
+                        for (let i = 1; i < methodPath.length; i++) {
+                            obj = obj[methodPath[i]];
+                        }
+                        if (obj !== undefined) {
+                            availableMethods.push(method);
+                            console.log(`✅ ${method} is available`);
+                        } else {
+                            console.log(`❌ ${method} is not available`);
+                        }
+                    } catch (e) {
+                        console.log(`❌ ${method} is not available: ${e.message}`);
+                    }
+                });
+                
+                if (availableMethods.length > 0) {
+                    output.innerHTML = `<div class="success">✅ Arrow API test successful! Available methods: ${availableMethods.join(', ')}</div>`;
+                } else {
+                    output.innerHTML = '<div class="error">❌ No Arrow API methods found</div>';
+                }
+            } catch (error) {
+                output.innerHTML = '<div class="error">❌ ' + error.message + '</div>';
+            }
+        }
+
         function testFileLoading() {
             const fileInput = document.getElementById('fileInput');
             const output = document.getElementById('fileOutput');
@@ -97,23 +149,29 @@
                     
                     // Try parsing with different methods
                     let table;
+                    let methodUsed = '';
+                    
                     if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
                         table = Arrow.Table.from(uint8Array);
+                        methodUsed = 'Arrow.Table.from';
                     } else if (typeof Arrow.tableFrom !== 'undefined') {
                         table = Arrow.tableFrom(uint8Array);
+                        methodUsed = 'Arrow.tableFrom';
                     } else if (typeof Arrow.read !== 'undefined') {
                         table = Arrow.read(uint8Array);
+                        methodUsed = 'Arrow.read';
                     } else {
                         throw new Error('No compatible Arrow parsing method found');
                     }
                     
                     console.log('Successfully parsed table:', {
+                        methodUsed,
                         numRows: table.numRows,
                         numCols: table.numCols,
                         schema: table.schema.fields.map(f => ({ name: f.name, type: f.type.toString() }))
                     });
                     
-                    output.innerHTML += '<div class="success">✅ File parsed successfully!</div>';
+                    output.innerHTML += `<div class="success">✅ File parsed successfully using ${methodUsed}!</div>`;
                 } catch (error) {
                     console.error('Parsing failed:', error);
                     output.innerHTML += '<div class="error">❌ Parsing failed: ' + error.message + '</div>';

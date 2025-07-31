@@ -66,8 +66,8 @@ class ArrowQuery {
     }
 
     // Add derived field
-    addDerivedField(name, type, sourceField, options = {}) {
-        this.derivedFields.set(name, {
+    addDerivedField(type, sourceField, outputField, options = {}) {
+        this.derivedFields.set(outputField, {
             type,
             sourceField,
             options

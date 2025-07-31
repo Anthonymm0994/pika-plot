@@ -6,7 +6,7 @@
     <title>Arrow Data Explorer - Test Page</title>
     <link rel="stylesheet" href="css/style.css">
     <!-- Apache Arrow JS -->
-    <script src="https://unpkg.com/apache-arrow@14.0.2/Arrow.es2015.min.js"></script>
+    <script src="https://unpkg.com/apache-arrow@latest/dist/Arrow.es2015.min.js"></script>
     <!-- Arquero for data manipulation -->
     <script src="https://unpkg.com/arquero@5.3.0/dist/arquero.min.js"></script>
     <!-- Observable Plot for visualization -->
@@ -389,7 +389,16 @@
         function createArrowBuffer(data) {
             try {
                 // Convert JavaScript objects to Arrow format
-                const table = Arrow.Table.from(data);
+                let table;
+                if (typeof Arrow.Table !== 'undefined' && typeof Arrow.Table.from === 'function') {
+                    table = Arrow.Table.from(data);
+                } else if (typeof Arrow.tableFrom !== 'undefined') {
+                    table = Arrow.tableFrom(data);
+                } else if (typeof Arrow.read !== 'undefined') {
+                    table = Arrow.read(data);
+                } else {
+                    throw new Error('No compatible Arrow table creation method found');
+                }
                 return table.serialize();
             } catch (error) {
                 console.error('Error creating Arrow buffer:', error);

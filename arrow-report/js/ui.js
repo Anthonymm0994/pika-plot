@@ -297,6 +297,14 @@ class ArrowUI {
                 plotData = dataWithDerived.objects();
             } else if (Array.isArray(dataWithDerived)) {
                 plotData = dataWithDerived;
+            } else if (dataWithDerived && typeof dataWithDerived.toArray === 'function') {
+                plotData = dataWithDerived.toArray();
+            }
+
+            // Ensure we have valid data for plotting
+            if (!plotData || plotData.length === 0) {
+                this.plot.showEmptyState('No data available for plotting');
+                return;
             }
 
             // Update plot
