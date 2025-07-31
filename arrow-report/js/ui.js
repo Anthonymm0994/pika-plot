@@ -4,476 +4,391 @@ class ArrowUI {
         this.loader = new ArrowLoader();
         this.query = new ArrowQuery();
         this.plot = new ArrowPlot();
-        
-        this.currentSchema = null;
-        this.currentFileInfo = null;
-        
-        this.init();
+        this.currentData = null;
+        this.schema = null;
+        this.fileInfo = null;
+        this.derivedFields = [];
     }
 
-    // Initialize UI
     init() {
         this.setupEventListeners();
-        this.plot.init('plotContainer');
-        
-        // Set loader callbacks
-        this.loader.setCallbacks(
-            (data, schema, fileInfo) => this.onDataLoaded(data, schema, fileInfo),
-            (error) => this.onError(error)
-        );
+        this.updateStatus('Ready to load Arrow files');
     }
 
-    // Setup event listeners
     setupEventListeners() {
-        // File loading
-        const dropZone = document.getElementById('dropZone');
+        // File drop zone
+        const dropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
-        const filePicker = document.getElementById('filePicker');
 
-        // Drag and drop
+        // Drag and drop events
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropZone.classList.add('dragover');
+            dropZone.classList.add('drag-over');
         });
 
         dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('dragover');
+            dropZone.classList.remove('drag-over');
         });
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropZone.classList.remove('dragover');
-            
+            dropZone.classList.remove('drag-over');
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 this.handleFileSelect(files[0]);
             }
         });
 
-        // File picker
-        filePicker.addEventListener('click', () => {
-            fileInput.click();
-        });
-
+        // File input change
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 this.handleFileSelect(e.target.files[0]);
             }
         });
 
-        // Plot controls
-        const updatePlotBtn = document.getElementById('updatePlot');
-        updatePlotBtn.addEventListener('click', () => this.updatePlot());
+        // Browse button
+        document.getElementById('browseBtn').addEventListener('click', () => {
+            fileInput.click();
+        });
 
-        // Chart type change
-        const chartTypeSelect = document.getElementById('chartType');
-        chartTypeSelect.addEventListener('change', () => this.onChartTypeChange());
+        // Chart type selector
+        document.getElementById('chartType').addEventListener('change', (e) => {
+            this.onChartTypeChange(e.target.value);
+        });
+
+        // Filter controls
+        document.getElementById('addFilterBtn').addEventListener('click', () => {
+            this.addFilter();
+        });
 
         // Derived fields
-        const addDerivedBtn = document.getElementById('addDerived');
-        addDerivedBtn.addEventListener('click', () => this.addDerivedField());
+        document.getElementById('addDerivedFieldBtn').addEventListener('click', () => {
+            this.addDerivedField();
+        });
 
-        // Window resize
-        window.addEventListener('resize', () => {
-            this.plot.resize();
+        // Export buttons
+        document.getElementById('exportSvgBtn').addEventListener('click', () => {
+            this.exportPlot('svg');
+        });
+
+        document.getElementById('exportPngBtn').addEventListener('click', () => {
+            this.exportPlot('png');
+        });
+
+        // Reset button
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            this.reset();
         });
     }
 
-    // Handle file selection
     async handleFileSelect(file) {
         if (!this.loader.isValidArrowFile(file)) {
-            this.showError('Please select a valid Arrow or Parquet file (.arrow, .parquet)');
+            this.showMessage('Please select a valid Arrow (.arrow) or Parquet (.parquet) file', 'error');
+            return;
+        }
+
+        this.updateStatus('Loading file...');
+        
+        try {
+            const result = await this.loader.loadArrowFile(file);
+            this.onDataLoaded(result.table, result.schema, result.fileInfo);
+        } catch (error) {
+            console.error('Error loading file:', error);
+            this.showMessage(`Error loading file: ${error.message}`, 'error');
+            this.updateStatus('Error loading file');
+        }
+    }
+
+    onDataLoaded(table, schema, fileInfo) {
+        this.currentData = table;
+        this.schema = schema;
+        this.fileInfo = fileInfo;
+        this.query.setData(table);
+
+        this.updateFileInfo(fileInfo);
+        this.updateFieldSelectors(schema);
+        this.updateFilterControls();
+        this.updateDerivedFieldsList();
+
+        this.updateStatus(`Loaded ${fileInfo.size ? this.formatFileSize(fileInfo.size) : 'unknown size'} file with ${schema.numRows.toLocaleString()} rows and ${schema.numCols} columns`);
+        this.showMessage('File loaded successfully!', 'success');
+    }
+
+    updateFileInfo(fileInfo) {
+        const fileInfoElement = document.getElementById('fileInfo');
+        if (fileInfoElement) {
+            fileInfoElement.innerHTML = `
+                <h3>File Information</h3>
+                <p><strong>Name:</strong> ${fileInfo.name}</p>
+                <p><strong>Size:</strong> ${this.formatFileSize(fileInfo.size)}</p>
+                <p><strong>Modified:</strong> ${new Date(fileInfo.lastModified).toLocaleString()}</p>
+            `;
+        }
+    }
+
+    updateFieldSelectors(schema) {
+        const xFieldSelect = document.getElementById('xField');
+        const yFieldSelect = document.getElementById('yField');
+        const colorFieldSelect = document.getElementById('colorField');
+
+        // Clear existing options
+        xFieldSelect.innerHTML = '<option value="">Select X field</option>';
+        yFieldSelect.innerHTML = '<option value="">Select Y field</option>';
+        colorFieldSelect.innerHTML = '<option value="">Select color field</option>';
+
+        // Add field options with type information
+        schema.fields.forEach(field => {
+            const option = document.createElement('option');
+            option.value = field.name;
+            option.textContent = `${field.name} (${field.type})`;
+            option.dataset.type = field.type;
+            
+            xFieldSelect.appendChild(option.cloneNode(true));
+            yFieldSelect.appendChild(option.cloneNode(true));
+            colorFieldSelect.appendChild(option.cloneNode(true));
+        });
+
+        // Auto-select appropriate fields based on type
+        this.autoSelectFields(schema);
+    }
+
+    autoSelectFields(schema) {
+        const numericFields = schema.fields.filter(f => 
+            f.type.includes('Int') || f.type.includes('Uint') || f.type.includes('Float')
+        );
+        const dateFields = schema.fields.filter(f => 
+            f.type.includes('Date') || f.type.includes('Timestamp')
+        );
+        const categoricalFields = schema.fields.filter(f => 
+            f.type.includes('Utf8') || f.type.includes('String')
+        );
+
+        // Auto-select X field (prefer date/time, then numeric)
+        if (dateFields.length > 0) {
+            document.getElementById('xField').value = dateFields[0].name;
+        } else if (numericFields.length > 0) {
+            document.getElementById('xField').value = numericFields[0].name;
+        }
+
+        // Auto-select Y field (prefer numeric)
+        if (numericFields.length > 0) {
+            const yField = numericFields.find(f => f.name !== document.getElementById('xField').value) || numericFields[0];
+            document.getElementById('yField').value = yField.name;
+        }
+
+        // Auto-select color field (prefer categorical)
+        if (categoricalFields.length > 0) {
+            document.getElementById('colorField').value = categoricalFields[0].name;
+        }
+    }
+
+    updateFilterControls() {
+        const filterContainer = document.getElementById('filterContainer');
+        filterContainer.innerHTML = '';
+
+        if (!this.schema) return;
+
+        this.schema.fields.forEach(field => {
+            const filterGroup = document.createElement('div');
+            filterGroup.className = 'filter-group';
+            filterGroup.innerHTML = `
+                <label>${field.name} (${field.type}):</label>
+                <select class="filter-operator">
+                    <option value="">No filter</option>
+                    <option value="==">Equals</option>
+                    <option value="!=">Not equals</option>
+                    <option value=">">Greater than</option>
+                    <option value="<">Less than</option>
+                    <option value=">=">Greater than or equal</option>
+                    <option value="<=">Less than or equal</option>
+                    <option value="in">In list</option>
+                    <option value="contains">Contains</option>
+                </select>
+                <input type="text" class="filter-value" placeholder="Value">
+                <button class="remove-filter" onclick="this.parentElement.remove()">×</button>
+            `;
+            filterContainer.appendChild(filterGroup);
+        });
+    }
+
+    onFilterChange() {
+        this.updatePlot();
+    }
+
+    onChartTypeChange(chartType) {
+        this.plot.setConfig({ chartType });
+        this.updatePlot();
+    }
+
+    updatePlot() {
+        if (!this.currentData) return;
+
+        try {
+            const xField = document.getElementById('xField').value;
+            const yField = document.getElementById('yField').value;
+            const colorField = document.getElementById('colorField').value;
+            const chartType = document.getElementById('chartType').value;
+
+            if (!xField || !yField) {
+                this.plot.showEmptyState('Please select X and Y fields');
+                return;
+            }
+
+            // Apply filters
+            const filteredData = this.query.applyFilters(this.currentData);
+            
+            // Apply derived fields
+            const dataWithDerived = this.query.applyDerivedFields(filteredData);
+
+            // Get plot data
+            const plotData = this.query.getPlotData(dataWithDerived, xField, yField, colorField, chartType);
+
+            // Update plot
+            this.plot.updatePlot(plotData, {
+                chartType,
+                xField,
+                yField,
+                colorField
+            });
+
+        } catch (error) {
+            console.error('Error updating plot:', error);
+            this.plot.showErrorState(`Error updating plot: ${error.message}`);
+        }
+    }
+
+    addFilter() {
+        const filterContainer = document.getElementById('filterContainer');
+        const filterGroup = document.createElement('div');
+        filterGroup.className = 'filter-group';
+        filterGroup.innerHTML = `
+            <select class="filter-field">
+                ${this.schema ? this.schema.fields.map(f => `<option value="${f.name}">${f.name} (${f.type})</option>`).join('') : ''}
+            </select>
+            <select class="filter-operator">
+                <option value="==">Equals</option>
+                <option value="!=">Not equals</option>
+                <option value=">">Greater than</option>
+                <option value="<">Less than</option>
+                <option value=">=">Greater than or equal</option>
+                <option value="<=">Less than or equal</option>
+                <option value="in">In list</option>
+                <option value="contains">Contains</option>
+            </select>
+            <input type="text" class="filter-value" placeholder="Value">
+            <button class="remove-filter" onclick="this.parentElement.remove()">×</button>
+        `;
+        filterContainer.appendChild(filterGroup);
+    }
+
+    addDerivedField() {
+        const derivedFieldType = document.getElementById('derivedFieldType').value;
+        const sourceField = document.getElementById('sourceField').value;
+        const outputField = document.getElementById('outputField').value;
+
+        if (!sourceField || !outputField) {
+            this.showMessage('Please select source field and enter output field name', 'error');
             return;
         }
 
         try {
-            await this.loader.loadArrowFile(file);
+            this.query.addDerivedField(derivedFieldType, sourceField, outputField);
+            this.derivedFields.push({
+                type: derivedFieldType,
+                source: sourceField,
+                output: outputField
+            });
+            this.updateDerivedFieldsList();
+            this.updatePlot();
+            this.showMessage('Derived field added successfully!', 'success');
         } catch (error) {
-            this.showError(`Error loading file: ${error.message}`);
+            this.showMessage(`Error adding derived field: ${error.message}`, 'error');
         }
     }
 
-    // Called when data is successfully loaded
-    onDataLoaded(data, schema, fileInfo) {
-        this.currentSchema = schema;
-        this.currentFileInfo = fileInfo;
-        
-        // Set data in query module
-        this.query.setData(data);
-        
-        // Update UI
-        this.updateFileInfo(fileInfo);
-        this.updateFieldSelectors(schema);
-        this.showSections();
-        this.updateStatus();
-        
-        // Show success message
-        this.showSuccess(`Successfully loaded ${fileInfo.rowCount.toLocaleString()} rows`);
-    }
-
-    // Called when an error occurs
-    onError(error) {
-        this.showError(`Error: ${error.message}`);
-        this.updateStatus('Error loading file');
-    }
-
-    // Update file info display
-    updateFileInfo(fileInfo) {
-        const fileInfoDiv = document.getElementById('fileInfo');
-        const fileStatsDiv = document.getElementById('fileStats');
-        
-        fileStatsDiv.innerHTML = `
-            <div><strong>Name:</strong> ${fileInfo.name}</div>
-            <div><strong>Size:</strong> ${this.formatFileSize(fileInfo.size)}</div>
-            <div><strong>Rows:</strong> ${fileInfo.rowCount.toLocaleString()}</div>
-            <div><strong>Columns:</strong> ${fileInfo.columnCount}</div>
-            <div><strong>Modified:</strong> ${new Date(fileInfo.lastModified).toLocaleString()}</div>
-        `;
-        
-        fileInfoDiv.style.display = 'block';
-    }
-
-    // Update field selectors
-    updateFieldSelectors(schema) {
-        const xAxisSelect = document.getElementById('xAxis');
-        const yAxisSelect = document.getElementById('yAxis');
-        const facetBySelect = document.getElementById('facetBy');
-        const derivedSourceSelect = document.getElementById('derivedSource');
-        
-        // Clear existing options
-        xAxisSelect.innerHTML = '<option value="">Select field...</option>';
-        yAxisSelect.innerHTML = '<option value="">Select field...</option>';
-        facetBySelect.innerHTML = '<option value="">No faceting</option>';
-        derivedSourceSelect.innerHTML = '<option value="">Select field...</option>';
-        
-        // Add all fields to X and Y axis
-        schema.fields.forEach(field => {
-            const option = document.createElement('option');
-            option.value = field.name;
-            option.textContent = field.name;
-            
-            xAxisSelect.appendChild(option.cloneNode(true));
-            yAxisSelect.appendChild(option.cloneNode(true));
-            derivedSourceSelect.appendChild(option.cloneNode(true));
-        });
-        
-        // Add categorical fields to facet
-        schema.categoricalFields.forEach(field => {
-            const option = document.createElement('option');
-            option.value = field;
-            option.textContent = field;
-            facetBySelect.appendChild(option);
-        });
-        
-        // Add numeric fields to derived source
-        schema.numericFields.forEach(field => {
-            const option = document.createElement('option');
-            option.value = field;
-            option.textContent = field;
-            derivedSourceSelect.appendChild(option);
-        });
-    }
-
-    // Show/hide sections based on data availability
-    showSections() {
-        const sections = ['filterSection', 'plotSection', 'derivedSection'];
-        sections.forEach(sectionId => {
-            const section = document.getElementById(sectionId);
-            if (section) {
-                section.style.display = 'block';
-            }
-        });
-        
-        // Update filter controls
-        this.updateFilterControls();
-    }
-
-    // Update filter controls
-    updateFilterControls() {
-        const filterControls = document.getElementById('filterControls');
-        filterControls.innerHTML = '';
-        
-        if (!this.currentSchema) return;
-        
-        this.currentSchema.categoricalFields.forEach(field => {
-            const filterGroup = this.createFilterGroup(field);
-            filterControls.appendChild(filterGroup);
-        });
-    }
-
-    // Create filter group for a field
-    createFilterGroup(fieldName) {
-        const filterGroup = document.createElement('div');
-        filterGroup.className = 'filter-group';
-        
-        const uniqueValues = this.loader.getUniqueValues(fieldName, 50);
-        
-        filterGroup.innerHTML = `
-            <label>${fieldName}</label>
-            <div class="filter-values">
-                ${uniqueValues.map(value => `
-                    <label class="filter-checkbox">
-                        <input type="checkbox" value="${value}" data-field="${fieldName}" checked>
-                        ${value}
-                    </label>
-                `).join('')}
-            </div>
-        `;
-        
-        // Add event listeners
-        const checkboxes = filterGroup.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', () => this.onFilterChange(fieldName));
-        });
-        
-        return filterGroup;
-    }
-
-    // Handle filter change
-    onFilterChange(fieldName) {
-        const checkboxes = document.querySelectorAll(`input[data-field="${fieldName}"]:checked`);
-        const selectedValues = Array.from(checkboxes).map(cb => cb.value);
-        
-        this.query.addFilter(fieldName, selectedValues);
-        this.updatePlot();
-        this.updateStatus();
-    }
-
-    // Handle chart type change
-    onChartTypeChange() {
-        const chartType = document.getElementById('chartType').value;
-        const yAxisSelect = document.getElementById('yAxis');
-        
-        // Show/hide Y axis based on chart type
-        if (chartType === 'histogram') {
-            yAxisSelect.parentElement.style.display = 'none';
-        } else {
-            yAxisSelect.parentElement.style.display = 'block';
-        }
-    }
-
-    // Update plot
-    updatePlot() {
-        const chartType = document.getElementById('chartType').value;
-        const xField = document.getElementById('xAxis').value;
-        const yField = document.getElementById('yAxis').value;
-        const facetField = document.getElementById('facetBy').value;
-        const bins = parseInt(document.getElementById('bins').value) || 20;
-        
-        if (!xField) {
-            this.plot.showEmptyState();
-            return;
-        }
-        
-        // Get plot data
-        const plotData = this.query.getPlotData(xField, yField, facetField);
-        
-        // Set plot configuration
-        this.plot.setConfig({
-            chartType,
-            xField,
-            yField,
-            facetField: facetField || null,
-            bins
-        });
-        
-        // Update plot
-        this.plot.updatePlot(plotData);
-        
-        // Update status
-        this.updateStatus();
-    }
-
-    // Add derived field
-    addDerivedField() {
-        const type = document.getElementById('derivedType').value;
-        const sourceField = document.getElementById('derivedSource').value;
-        const fieldName = document.getElementById('derivedName').value;
-        
-        if (!sourceField || !fieldName) {
-            this.showError('Please select a source field and provide a field name');
-            return;
-        }
-        
-        // Add derived field
-        this.query.addDerivedField(fieldName, type, sourceField, {
-            bins: parseInt(document.getElementById('bins').value) || 20
-        });
-        
-        // Update derived fields list
-        this.updateDerivedFieldsList();
-        
-        // Update plot
-        this.updatePlot();
-        
-        // Clear form
-        document.getElementById('derivedName').value = '';
-        
-        this.showSuccess(`Added derived field: ${fieldName}`);
-    }
-
-    // Update derived fields list
     updateDerivedFieldsList() {
         const derivedFieldsList = document.getElementById('derivedFieldsList');
-        const derivedFields = this.query.getDerivedFields();
-        
+        if (!derivedFieldsList) return;
+
         derivedFieldsList.innerHTML = '';
-        
-        derivedFields.forEach((config, fieldName) => {
-            const fieldItem = document.createElement('div');
-            fieldItem.className = 'derived-field-item';
-            
-            fieldItem.innerHTML = `
-                <div class="derived-field-info">
-                    <div class="derived-field-name">${fieldName}</div>
-                    <div class="derived-field-details">
-                        Type: ${config.type}, Source: ${config.sourceField}
-                    </div>
-                </div>
-                <button class="btn btn-danger btn-sm" onclick="arrowUI.removeDerivedField('${fieldName}')">
-                    Remove
-                </button>
+        this.derivedFields.forEach((field, index) => {
+            const fieldElement = document.createElement('div');
+            fieldElement.className = 'derived-field-item';
+            fieldElement.innerHTML = `
+                <span>${field.output} = ${field.type}(${field.source})</span>
+                <button onclick="arrowUI.removeDerivedField(${index})">×</button>
             `;
-            
-            derivedFieldsList.appendChild(fieldItem);
+            derivedFieldsList.appendChild(fieldElement);
         });
     }
 
-    // Remove derived field
-    removeDerivedField(fieldName) {
-        this.query.removeDerivedField(fieldName);
+    removeDerivedField(index) {
+        this.derivedFields.splice(index, 1);
         this.updateDerivedFieldsList();
         this.updatePlot();
-        this.showSuccess(`Removed derived field: ${fieldName}`);
     }
 
-    // Update status
-    updateStatus() {
-        const summary = this.query.getDataSummary();
-        if (summary) {
-            const statusStats = document.getElementById('statusStats');
-            statusStats.innerHTML = `
-                <span>Rows: ${summary.totalRows.toLocaleString()}</span>
-                <span>Filters: ${summary.activeFilters}</span>
-                <span>Derived: ${summary.derivedFields}</span>
-            `;
+    updateStatus(message) {
+        const statusElement = document.getElementById('statusInfo');
+        if (statusElement) {
+            statusElement.textContent = message;
         }
     }
 
-    // Show success message
-    showSuccess(message) {
-        this.showMessage(message, 'success');
-    }
+    showMessage(message, type = 'info') {
+        const messageContainer = document.getElementById('messageContainer');
+        if (!messageContainer) return;
 
-    // Show error message
-    showError(message) {
-        this.showMessage(message, 'error');
-    }
-
-    // Show message
-    showMessage(message, type) {
-        // Remove existing messages
-        const existingMessages = document.querySelectorAll('.message');
-        existingMessages.forEach(msg => msg.remove());
+        const messageElement = document.createElement('div');
+        messageElement.className = `message ${type}`;
+        messageElement.textContent = message;
         
-        // Create new message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
-        messageDiv.textContent = message;
+        messageContainer.appendChild(messageElement);
         
-        // Add to page
-        document.body.appendChild(messageDiv);
-        
-        // Remove after 5 seconds
+        // Auto-remove after 5 seconds
         setTimeout(() => {
-            messageDiv.remove();
+            if (messageElement.parentNode) {
+                messageElement.parentNode.removeChild(messageElement);
+            }
         }, 5000);
     }
 
-    // Format file size
     formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
-        
         const k = 1024;
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    // Export plot
-    exportPlot(format = 'svg') {
-        if (format === 'svg') {
-            const svg = this.plot.exportAsSVG();
-            if (svg) {
-                this.downloadFile(svg, 'plot.svg', 'image/svg+xml');
+    exportPlot(format) {
+        try {
+            if (format === 'svg') {
+                this.plot.exportAsSVG();
+            } else if (format === 'png') {
+                this.plot.exportAsPNG();
             }
-        } else if (format === 'png') {
-            this.plot.exportAsPNG().then(blob => {
-                if (blob) {
-                    this.downloadFile(blob, 'plot.png', 'image/png');
-                }
-            });
+            this.showMessage(`Plot exported as ${format.toUpperCase()}`, 'success');
+        } catch (error) {
+            this.showMessage(`Error exporting plot: ${error.message}`, 'error');
         }
     }
 
-    // Download file
-    downloadFile(content, filename, mimeType) {
-        const blob = new Blob([content], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    // Get current state
-    getCurrentState() {
-        return {
-            schema: this.currentSchema,
-            fileInfo: this.currentFileInfo,
-            filters: this.query.getFilters(),
-            derivedFields: this.query.getDerivedFields(),
-            plotConfig: this.plot.plotConfig
-        };
-    }
-
-    // Reset everything
     reset() {
-        this.currentSchema = null;
-        this.currentFileInfo = null;
+        this.currentData = null;
+        this.schema = null;
+        this.fileInfo = null;
+        this.derivedFields = [];
+        this.query.reset();
+        this.plot.reset();
         
-        this.query.setData(null);
-        this.plot.clear();
-        
-        // Hide sections
-        const sections = ['filterSection', 'plotSection', 'derivedSection', 'fileInfo'];
-        sections.forEach(sectionId => {
-            const section = document.getElementById(sectionId);
-            if (section) {
-                section.style.display = 'none';
-            }
-        });
-        
-        // Clear form controls
-        const selects = ['xAxis', 'yAxis', 'facetBy', 'derivedSource'];
-        selects.forEach(selectId => {
-            const select = document.getElementById(selectId);
-            if (select) {
-                select.innerHTML = '<option value="">Select field...</option>';
-            }
-        });
-        
-        // Clear derived fields
+        // Reset UI
+        document.getElementById('fileInfo').innerHTML = '';
+        document.getElementById('filterContainer').innerHTML = '';
         document.getElementById('derivedFieldsList').innerHTML = '';
-        document.getElementById('derivedName').value = '';
-        
-        // Update status
-        this.updateStatus();
+        this.updateFieldSelectors({ fields: [] });
+        this.updateStatus('Ready to load Arrow files');
+        this.showMessage('Application reset', 'info');
     }
 }
 

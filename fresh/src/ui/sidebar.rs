@@ -35,8 +35,6 @@ impl Sidebar {
         // Darker background for the sidebar
         ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_gray(25);
         
-        let mut duplicate_clicked = false;
-        
         ui.vertical(|ui| {
             ui.heading("Data Sources");
             ui.separator();
@@ -46,19 +44,19 @@ impl Sidebar {
             ui.separator();
             
             if ui.button("🔍 Detect Duplicate Blocks").clicked() {
-                duplicate_clicked = true;
+                self.duplicate_detection_clicked = true;
             }
             
             if ui.button("➕ Add Derived Field").clicked() {
-                return SidebarAction::AddDerivedField;
+                action = SidebarAction::AddDerivedField;
             }
             
             if ui.button("⏰ Add Time Bin Column").clicked() {
-                return SidebarAction::AddTimeBinColumn;
+                action = SidebarAction::AddTimeBinColumn;
             }
             
             if ui.button("🆔 Add Row ID Columns").clicked() {
-                return SidebarAction::AddRowIdColumns;
+                action = SidebarAction::AddRowIdColumns;
             }
             
             ui.add_space(10.0);
@@ -168,7 +166,7 @@ impl Sidebar {
         
         if action != SidebarAction::None {
             action
-        } else if duplicate_clicked {
+        } else if self.duplicate_detection_clicked {
             SidebarAction::OpenDuplicateDetection
         } else if let Some(table) = table_to_open {
             SidebarAction::OpenTable(table)
