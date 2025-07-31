@@ -1309,6 +1309,36 @@ impl Database {
         Ok(batch)
     }
 
+    /// Non-mutable version of load_table_arrow_batch for use with Arc<Database>
+    pub fn get_table_arrow_batch(&self, table_name: &str) -> Result<Arc<RecordBatch>> {
+        if let Some(batch) = self.registered_tables.get(table_name) {
+            return Ok(batch.clone());
+        }
+        
+        // Try to query the table to get its data
+        let query = format!("SELECT * FROM '{}'", table_name);
+        let ctx = self.ctx.clone();
+        
+        let result = self.runtime.block_on(async {
+            ctx.sql(&query).await
+        }).map_err(|e| FreshError::Custom(format!("Failed to load table: {}", e)))?;
+        
+        let record_batches = self.runtime.block_on(async {
+            result.collect().await
+        }).map_err(|e| FreshError::Custom(format!("Failed to collect table data: {}", e)))?;
+        
+        if record_batches.is_empty() {
+            return Err(FreshError::Custom("No data found in table".to_string()));
+        }
+        
+        let batch = Arc::new(record_batches[0].clone());
+        
+        // Note: We can't insert into registered_tables here since we don't have mutable access
+        // This is a limitation when working with Arc<Database>
+        
+        Ok(batch)
+    }
+
     fn warn_if_cloud_folder(_path: &Path) {
         // DataFusion is in-memory, so no file locking concerns
     }

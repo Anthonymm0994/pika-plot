@@ -1,6 +1,6 @@
 use egui::{Context, Id};
 use crate::core::{Database, TableInfo};
-use crate::ui::{Sidebar, QueryWindow, CsvImportDialog, FileConfigDialog, HomeScreen, PlotWindow};
+use crate::ui::{Sidebar, SidebarAction, QueryWindow, CsvImportDialog, FileConfigDialog, HomeScreen, PlotWindow, DuplicateDetectionDialog, DuplicateResultsViewer};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,6 +27,8 @@ pub struct FreshApp<'a> {
     plot_windows: Vec<PlotWindow<'a>>,
     csv_import_dialog: Option<CsvImportDialog>,
     file_config_dialog: FileConfigDialog,
+    duplicate_detection_dialog: DuplicateDetectionDialog,
+    duplicate_results_viewer: DuplicateResultsViewer,
     next_window_id: usize,
     error: Option<String>,
 }
@@ -45,6 +47,8 @@ impl<'a> FreshApp<'a> {
             plot_windows: Vec::new(),
             csv_import_dialog: None,
             file_config_dialog: FileConfigDialog::new(),
+            duplicate_detection_dialog: DuplicateDetectionDialog::default(),
+            duplicate_results_viewer: DuplicateResultsViewer::default(),
             next_window_id: 0,
             error: None,
         }
@@ -86,8 +90,17 @@ impl<'a> FreshApp<'a> {
                     // Set darker background for the sidebar panel
                     ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_gray(30);
                     
-                    if let Some(table_to_open) = self.sidebar.show(ctx, ui, &self.tables, &self.views) {
-                        self.open_query_window(&table_to_open);
+                    match self.sidebar.show(ctx, ui, &self.tables, &self.views) {
+                        SidebarAction::OpenTable(table_name) => {
+                            self.open_query_window(&table_name);
+                        }
+                        SidebarAction::OpenDuplicateDetection => {
+                            self.duplicate_detection_dialog.visible = true;
+                            if let Some(db) = &self.database {
+                                self.duplicate_detection_dialog.update_available_columns(db);
+                            }
+                        }
+                        SidebarAction::None => {}
                     }
                 });
         }
@@ -176,6 +189,11 @@ impl<'a> FreshApp<'a> {
                 self.csv_import_dialog = None;
                 self.load_tables(); // Refresh after import
             }
+        }
+        
+        // Show duplicate detection dialog if active
+        if let Some(db) = &self.database {
+            self.duplicate_detection_dialog.show(ctx, db);
         }
         
         // File config dialog

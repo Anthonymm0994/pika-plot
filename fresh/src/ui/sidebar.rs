@@ -1,9 +1,17 @@
 use egui;
 use crate::core::database::TableInfo;
 
+#[derive(Debug)]
+pub enum SidebarAction {
+    None,
+    OpenTable(String),
+    OpenDuplicateDetection,
+}
+
 pub struct Sidebar {
     selected_table: Option<String>,
     selected_view: Option<String>,
+    duplicate_detection_clicked: bool,
 }
 
 impl Sidebar {
@@ -11,11 +19,13 @@ impl Sidebar {
         Self {
             selected_table: None,
             selected_view: None,
+            duplicate_detection_clicked: false,
         }
     }
     
-    pub fn show(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, tables: &[TableInfo], views: &[String]) -> Option<String> {
+    pub fn show(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, tables: &[TableInfo], views: &[String]) -> SidebarAction {
         let mut table_to_open = None;
+        self.duplicate_detection_clicked = false;
         
         // Darker background for the sidebar
         ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_gray(25);
@@ -23,6 +33,16 @@ impl Sidebar {
         ui.vertical(|ui| {
             ui.heading("Data Sources");
             ui.separator();
+            
+            // Tools section
+            ui.heading("Tools");
+            ui.separator();
+            
+            if ui.button("🔍 Detect Duplicate Blocks").clicked() {
+                self.duplicate_detection_clicked = true;
+            }
+            
+            ui.add_space(10.0);
             
             // Tables section
             egui::CollapsingHeader::new(format!("Tables ({})", tables.len()))
@@ -127,6 +147,12 @@ impl Sidebar {
                 });
         });
         
-        table_to_open
+        if self.duplicate_detection_clicked {
+            SidebarAction::OpenDuplicateDetection
+        } else if let Some(table) = table_to_open {
+            SidebarAction::OpenTable(table)
+        } else {
+            SidebarAction::None
+        }
     }
 } 

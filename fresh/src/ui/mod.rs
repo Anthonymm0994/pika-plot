@@ -1,6 +1,7 @@
 mod sidebar;
 mod query_window;
 mod csv_import;
+mod duplicate_detection;
 pub mod file_config;
 mod theme;
 mod home_screen;
@@ -10,11 +11,12 @@ mod export_dialog;
 mod gpu_renderer;
 pub mod plots;
 
-pub use sidebar::Sidebar;
+pub use sidebar::{Sidebar, SidebarAction};
 pub use query_window::QueryWindow;
 pub use plot_window::{PlotWindow, PlotConfig};
 pub use plots::PlotType;
 pub use csv_import::CsvImportDialog;
+pub use duplicate_detection::{DuplicateDetectionDialog, DuplicateResultsViewer};
 pub use file_config::{FileConfigDialog, FileConfig};
 pub use theme::apply_theme;
 pub use home_screen::HomeScreen;
